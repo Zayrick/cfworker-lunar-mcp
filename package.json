@@ -15,5 +15,11 @@
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.67.0"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.26.0",
+		"agents": "^0.5.1",
+		"tyme4ts": "^1.4.2",
+		"zod": "^4.3.6"
 	}
 }
