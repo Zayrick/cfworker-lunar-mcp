@@ -205,8 +205,9 @@ function registerGanzhiTools(server: McpServer) {
 		'获取当前日期时间的天干地支（四柱/八字）。Get current date-time\'s 天干地支 four pillars.',
 		{},
 		async () => {
-			const now = new Date();
-			const datetime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+			// Use UTC+8 (China Standard Time) instead of UTC
+			const now = new Date(Date.now() + 8 * 3600_000);
+			const datetime = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
 			const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
 			return jsonResult({
 				currentTime: datetime,
