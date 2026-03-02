@@ -109,6 +109,7 @@ function pillarDetail(pillar: SixtyCycle, dayMaster: HeavenStem, isDayPillar: bo
 function findBracketingJie(year: number, month: number, day: number, hour: number, minute: number) {
 	interface JieTerm {
 		name: string;
+		year: number;
 		month: number;
 		day: number;
 		hour: number;
@@ -126,6 +127,7 @@ function findBracketingJie(year: number, month: number, day: number, hour: numbe
 				const st = t.getJulianDay().getSolarTime();
 				const item: JieTerm = {
 					name: t.getName(),
+					year: st.getYear(),
 					month: st.getMonth(),
 					day: st.getDay(),
 					hour: st.getHour(),
@@ -158,7 +160,7 @@ function findBracketingJie(year: number, month: number, day: number, hour: numbe
 		}
 	}
 
-	const fmt = (t: JieTerm) => `${t.month}月${t.day}日 ${pad(t.hour)}:${pad(t.minute)}:${pad(t.second)}`;
+	const fmt = (t: JieTerm) => `${t.year}年${t.month}月${t.day}日 ${pad(t.hour)}:${pad(t.minute)}:${pad(t.second)}`;
 	return {
 		current: { name: current.name, time: fmt(current) },
 		next: { name: next.name, time: fmt(next) },
@@ -233,7 +235,7 @@ function registerBaziChartTool(server: McpServer) {
 		async ({ datetime, gender }) => {
 			try {
 				const ctx = buildBaziContext(datetime);
-				const { dt, solarTime, lunarDay, eightChar, dayMaster } = ctx;
+				const { dt, solarTime, solarDay, lunarDay, eightChar, dayMaster } = ctx;
 				const g = toGender(gender);
 
 				// 四柱详情
@@ -301,8 +303,10 @@ function registerBaziChartTool(server: McpServer) {
 				}
 
 				return jsonResult({
-					fourPillars,
+					input: datetime,
+					solar: solarDay.toString(),
 					lunar,
+					fourPillars,
 					solarTerms,
 					fetalOrigin,
 					fetalBreath,
@@ -414,14 +418,28 @@ function registerFlowMonthTool(server: McpServer) {
 				const yearSc = scYear.getSixtyCycle();
 				const months = scYear.getMonths();
 
-				// Map month index to approximate Gregorian month
-				const monthLabels = ['寅月(2月)', '卯月(3月)', '辰月(4月)', '巳月(5月)', '午月(6月)', '未月(7月)',
-					'申月(8月)', '酉月(9月)', '戌月(10月)', '亥月(11月)', '子月(12月)', '丑月(1月)'];
-
 				const flowMonths = months.map((m, i) => {
 					const sc = m.getSixtyCycle();
+					const eb = sc.getEarthBranch();
+					const firstDay = m.getFirstDay();
+					const solarDay = firstDay.getSolarDay();
+					const solarStart = `${solarDay.getYear()}-${pad(solarDay.getMonth())}-${pad(solarDay.getDay())}`;
+
+					// Get end date: next month's first day - 1, or next year's first month - 1
+					let solarEnd: string;
+					if (i < months.length - 1) {
+						const nextFirst = months[i + 1].getFirstDay().getSolarDay();
+						const endDay = nextFirst.next(-1);
+						solarEnd = `${endDay.getYear()}-${pad(endDay.getMonth())}-${pad(endDay.getDay())}`;
+					} else {
+						const nextYearFirst = SixtyCycleYear.fromYear(year + 1).getFirstMonth().getFirstDay().getSolarDay();
+						const endDay = nextYearFirst.next(-1);
+						solarEnd = `${endDay.getYear()}-${pad(endDay.getMonth())}-${pad(endDay.getDay())}`;
+					}
+
 					return {
-						label: monthLabels[i],
+						monthName: `${eb.getName()}月`,
+						solarDateRange: `${solarStart} ~ ${solarEnd}`,
 						sixtyCycle: sc.getName(),
 						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
 						nayin: sc.getSound().getName(),
