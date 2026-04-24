@@ -534,16 +534,16 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
-		if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {
+		if (url.pathname === '/lunar') {
 			const server = createServer();
-			return createMcpHandler(server)(request, env, ctx);
+			return createMcpHandler(server, { route: '/lunar' })(request, env, ctx);
 		}
 
 		return new Response(
 			JSON.stringify({
 				name: 'Lunar Calendar MCP Server',
 				description: '农历/公历转换、天干地支、八字命盘、大运小运流年流月流日',
-				mcp_endpoint: '/mcp',
+				mcp_endpoint: '/lunar',
 				tools: allToolNames,
 			}),
 			{
