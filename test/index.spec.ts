@@ -26,7 +26,10 @@ describe('Lunar Calendar MCP Server', () => {
 	it('routes MCP requests on /lunar only', async () => {
 		const request = new IncomingRequest('http://example.com/lunar', {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: {
+				'content-type': 'application/json',
+				accept: 'application/json, text/event-stream',
+			},
 			body: JSON.stringify({
 				jsonrpc: '2.0',
 				id: 1,
@@ -37,7 +40,35 @@ describe('Lunar Calendar MCP Server', () => {
 		const ctx = createExecutionContext();
 		const response = await worker.fetch(request, env, ctx);
 		await waitOnExecutionContext(ctx);
-		expect(response.status).not.toBe(404);
+		expect(response.status).toBe(200);
+	});
+
+	it('returns display titles in MCP tools/list', async () => {
+		const request = new IncomingRequest('http://example.com/lunar', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				accept: 'application/json, text/event-stream',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+				params: {},
+			}),
+		});
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(request, env, ctx);
+		await waitOnExecutionContext(ctx);
+		const text = await response.text();
+		const dataLine = text.split('\n').find((line) => line.startsWith('data: '));
+		expect(dataLine).toBeDefined();
+		const body = JSON.parse(dataLine?.slice('data: '.length) ?? '{}') as {
+			result?: { tools?: Array<{ name: string; title?: string }> };
+		};
+		const tools = new Map(body.result?.tools?.map((tool) => [tool.name, tool]));
+		expect(tools.get('get_bazi_chart')?.title).toBe('八字排盘');
+		expect(tools.get('get_bazi_fortune')?.title).toBe('推算大运流年');
 	});
 
 	it('does not route subpaths as MCP endpoints', async () => {

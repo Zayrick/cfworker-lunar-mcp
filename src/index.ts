@@ -175,10 +175,13 @@ function sixtyCycleWithNayin(sc: SixtyCycle) {
 // ===== Tool Registration =====
 
 function registerGanzhiTools(server: McpServer) {
-	server.tool(
+	server.registerTool(
 		'convert_to_ganzhi',
-		'将公历日期时间转换为天干地支（四柱/八字）及农历日期。Convert Gregorian date-time to 天干地支 four pillars.',
-		{ datetime: z.string().describe('日期时间 YYYY-MM-DD HH:MM，如 "2024-01-15 08:30"') },
+		{
+			title: '公历转干支',
+			description: '将公历日期时间转换为天干地支（四柱/八字）及农历日期。Convert Gregorian date-time to 天干地支 four pillars.',
+			inputSchema: { datetime: z.string().describe('日期时间 YYYY-MM-DD HH:MM，如 "2024-01-15 08:30"') },
+		},
 		async ({ datetime }) => {
 			try {
 				const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
@@ -200,10 +203,13 @@ function registerGanzhiTools(server: McpServer) {
 		},
 	);
 
-	server.tool(
+	server.registerTool(
 		'get_current_ganzhi',
-		'获取当前日期时间的天干地支（四柱/八字）。Get current date-time\'s 天干地支 four pillars.',
-		{},
+		{
+			title: '获取当前干支',
+			description: '获取当前日期时间的天干地支（四柱/八字）。Get current date-time\'s 天干地支 four pillars.',
+			inputSchema: {},
+		},
 		async () => {
 			// Use UTC+8 (China Standard Time) instead of UTC
 			const now = new Date(Date.now() + 8 * 3600_000);
@@ -226,12 +232,15 @@ function registerGanzhiTools(server: McpServer) {
 }
 
 function registerBaziChartTool(server: McpServer) {
-	server.tool(
+	server.registerTool(
 		'get_bazi_chart',
-		'八字命盘：获取四柱详情（十神、天干、地支、藏干、星运、自坐、空亡、纳音）、农历、节气、胎元、胎息、命宫、身宫、起运时间、大运列表。',
 		{
-			datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-			gender: z.string().describe('性别：男/女 或 male/female'),
+			title: '八字排盘',
+			description: '八字命盘：获取四柱详情（十神、天干、地支、藏干、星运、自坐、空亡、纳音）、农历、节气、胎元、胎息、命宫、身宫、起运时间、大运列表。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				gender: z.string().describe('性别：男/女 或 male/female'),
+			},
 		},
 		async ({ datetime, gender }) => {
 			try {
@@ -324,14 +333,17 @@ function registerBaziChartTool(server: McpServer) {
 }
 
 function registerBaziFortuneTool(server: McpServer) {
-	server.tool(
+	server.registerTool(
 		'get_bazi_fortune',
-		'八字小运与流年：输入出生信息和年份范围，获取每年的小运（个人年运）和流年（该年干支）及对应十神。',
 		{
-			datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-			gender: z.string().describe('性别：男/女 或 male/female'),
-			startYear: z.number().describe('起始年份（公历年份）'),
-			count: z.number().optional().default(10).describe('查询年数，默认10'),
+			title: '推算大运流年',
+			description: '八字小运与流年：输入出生信息和年份范围，获取每年的小运（个人年运）和流年（该年干支）及对应十神。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				gender: z.string().describe('性别：男/女 或 male/female'),
+				startYear: z.number().describe('起始年份（公历年份）'),
+				count: z.number().optional().default(10).describe('查询年数，默认10'),
+			},
 		},
 		async ({ datetime, gender, startYear, count }) => {
 			try {
@@ -405,12 +417,15 @@ function registerBaziFortuneTool(server: McpServer) {
 }
 
 function registerFlowMonthTool(server: McpServer) {
-	server.tool(
+	server.registerTool(
 		'get_bazi_flow_month',
-		'八字流月：输入出生日期和指定年份，获取该年12个月的干支及十神（流月）。',
 		{
-			datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-			year: z.number().describe('查询年份（公历年份）'),
+			title: '流月排盘',
+			description: '八字流月：输入出生日期和指定年份，获取该年12个月的干支及十神（流月）。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				year: z.number().describe('查询年份（公历年份）'),
+			},
 		},
 		async ({ datetime, year }) => {
 			try {
@@ -461,13 +476,16 @@ function registerFlowMonthTool(server: McpServer) {
 }
 
 function registerFlowDayTool(server: McpServer) {
-	server.tool(
+	server.registerTool(
 		'get_bazi_flow_day',
-		'八字流日：输入出生日期和指定年月，获取该月每日的干支及十神（流日）。',
 		{
-			datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-			year: z.number().describe('查询年份（公历年份）'),
-			month: z.number().describe('查询月份（公历月份 1-12）'),
+			title: '流日排盘',
+			description: '八字流日：输入出生日期和指定年月，获取该月每日的干支及十神（流日）。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				year: z.number().describe('查询年份（公历年份）'),
+				month: z.number().describe('查询月份（公历月份 1-12）'),
+			},
 		},
 		async ({ datetime, year, month }) => {
 			try {
