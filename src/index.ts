@@ -31,6 +31,16 @@ function parseDatetime(datetime: string) {
 	};
 }
 
+function parseDate(date: string) {
+	const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	if (!match) return null;
+	return {
+		year: parseInt(match[1]),
+		month: parseInt(match[2]),
+		day: parseInt(match[3]),
+	};
+}
+
 function toGender(g: string): Gender {
 	return g === '男' || g.toLowerCase() === 'male' ? Gender.MAN : Gender.WOMAN;
 }
@@ -200,6 +210,10 @@ function cycleNayinText(item: CycleWithNayin) {
 	return `${item.sixtyCycle}(${item.nayin})`;
 }
 
+function solarTimeMinuteText(t: SolarTime) {
+	return `${t.getYear()}-${pad(t.getMonth())}-${pad(t.getDay())} ${pad(t.getHour())}:${pad(t.getMinute())}`;
+}
+
 function formatGanzhiResult(title: string, datetime: string, solar: string, lunar: string, eightChar: EightChar) {
 	return joinSections([
 		`${title}: ${datetime}\n公历: ${solar}\n农历: ${lunar}`,
@@ -225,6 +239,404 @@ function formatPillarsTable(fourPillars: Record<'year' | 'month' | 'day' | 'hour
 			['时柱', fourPillars.hour.pillar, fourPillars.hour.tenGod, fourPillars.hour.heavenStem, fourPillars.hour.earthBranch, hiddenStemsText(fourPillars.hour), fourPillars.hour.terrain, fourPillars.hour.selfSitting, fourPillars.hour.kongwang.join(''), fourPillars.hour.nayin],
 		],
 	);
+}
+
+const pillarKeys = ['year', 'month', 'day', 'hour'] as const;
+type PillarKey = typeof pillarKeys[number];
+
+const pillarLabels: Record<PillarKey, string> = {
+	year: '年柱',
+	month: '月柱',
+	day: '日柱',
+	hour: '时柱',
+};
+
+function getPillarCycles(eightChar: EightChar): Record<PillarKey, SixtyCycle> {
+	return {
+		year: eightChar.getYear(),
+		month: eightChar.getMonth(),
+		day: eightChar.getDay(),
+		hour: eightChar.getHour(),
+	};
+}
+
+function formatCycleLabel(label: string, cycle: SixtyCycle) {
+	return `${label}${cycle.getName()}`;
+}
+
+type TargetToken = { type: 'stem' | 'branch'; name: string };
+
+interface ShenshaRow {
+	name: string;
+	basis: string;
+	target: string;
+	hits: string[];
+}
+
+const stemBranchShenshaRules: Array<{
+	name: string;
+	basis: Array<'yearStem' | 'dayStem'>;
+	targets: Record<string, string[]>;
+}> = [
+	{
+		name: '天乙贵人',
+		basis: ['yearStem', 'dayStem'],
+		targets: {
+			甲: ['丑', '未'],
+			戊: ['丑', '未'],
+			庚: ['丑', '未'],
+			乙: ['子', '申'],
+			己: ['子', '申'],
+			丙: ['亥', '酉'],
+			丁: ['亥', '酉'],
+			壬: ['卯', '巳'],
+			癸: ['卯', '巳'],
+			辛: ['寅', '午'],
+		},
+	},
+	{
+		name: '文昌贵人',
+		basis: ['yearStem', 'dayStem'],
+		targets: {
+			甲: ['巳'],
+			乙: ['午'],
+			丙: ['申'],
+			丁: ['酉'],
+			戊: ['申'],
+			己: ['酉'],
+			庚: ['亥'],
+			辛: ['子'],
+			壬: ['寅'],
+			癸: ['卯'],
+		},
+	},
+	{
+		name: '羊刃',
+		basis: ['dayStem'],
+		targets: {
+			甲: ['卯'],
+			乙: ['寅'],
+			丙: ['午'],
+			丁: ['巳'],
+			戊: ['午'],
+			己: ['巳'],
+			庚: ['酉'],
+			辛: ['申'],
+			壬: ['子'],
+			癸: ['亥'],
+		},
+	},
+	{
+		name: '禄神',
+		basis: ['dayStem'],
+		targets: {
+			甲: ['寅'],
+			乙: ['卯'],
+			丙: ['巳'],
+			丁: ['午'],
+			戊: ['巳'],
+			己: ['午'],
+			庚: ['申'],
+			辛: ['酉'],
+			壬: ['亥'],
+			癸: ['子'],
+		},
+	},
+];
+
+const branchGroupShenshaRules: Array<{
+	name: string;
+	basis: Array<'yearBranch' | 'dayBranch'>;
+	targetsByGroup: Record<string, string>;
+}> = [
+	{ name: '桃花/咸池', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '酉', 寅午戌: '卯', 巳酉丑: '午', 亥卯未: '子' } },
+	{ name: '驿马', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '寅', 寅午戌: '申', 巳酉丑: '亥', 亥卯未: '巳' } },
+	{ name: '华盖', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '辰', 寅午戌: '戌', 巳酉丑: '丑', 亥卯未: '未' } },
+	{ name: '劫煞', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '巳', 寅午戌: '亥', 巳酉丑: '寅', 亥卯未: '申' } },
+	{ name: '将星', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '子', 寅午戌: '午', 巳酉丑: '酉', 亥卯未: '卯' } },
+];
+
+const monthBranchShenshaRules: Array<{
+	name: string;
+	targets: Record<string, TargetToken[]>;
+}> = [
+	{
+		name: '天德贵人',
+		targets: {
+			寅: [{ type: 'stem', name: '丁' }],
+			卯: [{ type: 'branch', name: '申' }],
+			辰: [{ type: 'stem', name: '壬' }],
+			巳: [{ type: 'stem', name: '辛' }],
+			午: [{ type: 'branch', name: '亥' }],
+			未: [{ type: 'stem', name: '甲' }],
+			申: [{ type: 'stem', name: '癸' }],
+			酉: [{ type: 'branch', name: '寅' }],
+			戌: [{ type: 'stem', name: '丙' }],
+			亥: [{ type: 'stem', name: '乙' }],
+			子: [{ type: 'branch', name: '巳' }],
+			丑: [{ type: 'stem', name: '庚' }],
+		},
+	},
+	{
+		name: '月德贵人',
+		targets: {
+			寅: [{ type: 'stem', name: '丙' }],
+			午: [{ type: 'stem', name: '丙' }],
+			戌: [{ type: 'stem', name: '丙' }],
+			申: [{ type: 'stem', name: '壬' }],
+			子: [{ type: 'stem', name: '壬' }],
+			辰: [{ type: 'stem', name: '壬' }],
+			亥: [{ type: 'stem', name: '甲' }],
+			卯: [{ type: 'stem', name: '甲' }],
+			未: [{ type: 'stem', name: '甲' }],
+			巳: [{ type: 'stem', name: '庚' }],
+			酉: [{ type: 'stem', name: '庚' }],
+			丑: [{ type: 'stem', name: '庚' }],
+		},
+	},
+];
+
+function groupTarget(originBranch: string, targetsByGroup: Record<string, string>) {
+	const group = Object.keys(targetsByGroup).find((item) => item.includes(originBranch));
+	if (!group) return undefined;
+	return targetsByGroup[group];
+}
+
+function targetText(targets: TargetToken[]) {
+	const stems = targets.filter((target) => target.type === 'stem').map((target) => target.name);
+	const branches = targets.filter((target) => target.type === 'branch').map((target) => target.name);
+	return [
+		stems.length > 0 ? `干:${stems.join('/')}` : undefined,
+		branches.length > 0 ? `支:${branches.join('/')}` : undefined,
+	].filter(Boolean).join(' ');
+}
+
+function matchTargets(pillars: Record<PillarKey, SixtyCycle>, targets: TargetToken[]) {
+	const hits: string[] = [];
+	for (const key of pillarKeys) {
+		const cycle = pillars[key];
+		const stemName = cycle.getHeavenStem().getName();
+		const branchName = cycle.getEarthBranch().getName();
+		const parts: string[] = [];
+		for (const target of targets) {
+			if (target.type === 'stem' && stemName === target.name) parts.push(`干${target.name}`);
+			if (target.type === 'branch' && branchName === target.name) parts.push(`支${target.name}`);
+		}
+		if (parts.length > 0) hits.push(`${formatCycleLabel(pillarLabels[key], cycle)}(${parts.join('/')})`);
+	}
+	return hits;
+}
+
+function calculateShensha(eightChar: EightChar) {
+	const pillars = getPillarCycles(eightChar);
+	const rows: ShenshaRow[] = [];
+	const basisValues = {
+		yearStem: { label: '年干', value: eightChar.getYear().getHeavenStem().getName() },
+		dayStem: { label: '日干', value: eightChar.getDay().getHeavenStem().getName() },
+		yearBranch: { label: '年支', value: eightChar.getYear().getEarthBranch().getName() },
+		dayBranch: { label: '日支', value: eightChar.getDay().getEarthBranch().getName() },
+	};
+
+	for (const rule of stemBranchShenshaRules) {
+		for (const basis of rule.basis) {
+			const basisValue = basisValues[basis];
+			const targets = (rule.targets[basisValue.value] ?? []).map((name) => ({ type: 'branch' as const, name }));
+			rows.push({
+				name: rule.name,
+				basis: `${basisValue.label}${basisValue.value}`,
+				target: targetText(targets),
+				hits: matchTargets(pillars, targets),
+			});
+		}
+	}
+
+	for (const rule of branchGroupShenshaRules) {
+		for (const basis of rule.basis) {
+			const basisValue = basisValues[basis];
+			const target = groupTarget(basisValue.value, rule.targetsByGroup);
+			const targets = target ? [{ type: 'branch' as const, name: target }] : [];
+			rows.push({
+				name: rule.name,
+				basis: `${basisValue.label}${basisValue.value}`,
+				target: targetText(targets),
+				hits: matchTargets(pillars, targets),
+			});
+		}
+	}
+
+	const monthBranch = eightChar.getMonth().getEarthBranch().getName();
+	for (const rule of monthBranchShenshaRules) {
+		const targets = rule.targets[monthBranch] ?? [];
+		rows.push({
+			name: rule.name,
+			basis: `月支${monthBranch}`,
+			target: targetText(targets),
+			hits: matchTargets(pillars, targets),
+		});
+	}
+
+	return rows;
+}
+
+function formatShenshaTable(eightChar: EightChar, onlyHits = false) {
+	const rows = calculateShensha(eightChar)
+		.filter((row) => !onlyHits || row.hits.length > 0)
+		.map((row) => [row.name, row.basis, row.target, row.hits.length > 0 ? row.hits.join('；') : '-']);
+	if (rows.length === 0) return '命中神煞: 无';
+	return mdTable(['神煞', '起法', '目标', '命中位置'], rows);
+}
+
+const branchOrder = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+
+function branchPairKey(a: string, b: string) {
+	return [a, b].sort((left, right) => branchOrder.indexOf(left) - branchOrder.indexOf(right)).join('');
+}
+
+const punishmentPairs: Record<string, string> = {
+	子卯: '无礼刑',
+	寅巳: '无恩刑',
+	寅申: '无恩刑',
+	巳申: '无恩刑',
+	丑未: '恃势刑',
+	丑戌: '恃势刑',
+	未戌: '恃势刑',
+};
+
+const breakPairs: Record<string, string> = {
+	子酉: '破',
+	丑辰: '破',
+	寅亥: '破',
+	卯午: '破',
+	巳申: '破',
+	未戌: '破',
+};
+
+const branchTripleCombos = [
+	{ type: '三合', branches: ['申', '子', '辰'], element: '水' },
+	{ type: '三合', branches: ['亥', '卯', '未'], element: '木' },
+	{ type: '三合', branches: ['寅', '午', '戌'], element: '火' },
+	{ type: '三合', branches: ['巳', '酉', '丑'], element: '金' },
+	{ type: '三会', branches: ['寅', '卯', '辰'], element: '木' },
+	{ type: '三会', branches: ['巳', '午', '未'], element: '火' },
+	{ type: '三会', branches: ['申', '酉', '戌'], element: '金' },
+	{ type: '三会', branches: ['亥', '子', '丑'], element: '水' },
+];
+
+function branchPairRelations(a: EarthBranch, b: EarthBranch) {
+	const relations: string[] = [];
+	const pairName = `${a.getName()}${b.getName()}`;
+	const pairKey = branchPairKey(a.getName(), b.getName());
+	const combine = a.combine(b);
+	if (combine) relations.push(`六合${combine.getName()}(${pairName})`);
+	if (a.getOpposite().equals(b)) relations.push(`六冲(${pairName})`);
+	if (a.getHarm().equals(b)) relations.push(`六害(${pairName})`);
+	if (punishmentPairs[pairKey]) relations.push(`${punishmentPairs[pairKey]}(${pairName})`);
+	if (breakPairs[pairKey]) relations.push(`破(${pairName})`);
+	return relations;
+}
+
+function formatRelationsTable(eightChar: EightChar) {
+	const pillars = getPillarCycles(eightChar);
+	const rows: string[][] = [];
+	const branchMap = new Map<string, string[]>();
+
+	for (let i = 0; i < pillarKeys.length; i++) {
+		const leftKey = pillarKeys[i];
+		const left = pillars[leftKey];
+		const leftBranch = left.getEarthBranch();
+		const branchName = leftBranch.getName();
+		branchMap.set(branchName, [...(branchMap.get(branchName) ?? []), formatCycleLabel(pillarLabels[leftKey], left)]);
+
+		for (let j = i + 1; j < pillarKeys.length; j++) {
+			const rightKey = pillarKeys[j];
+			const right = pillars[rightKey];
+			const stemCombine = left.getHeavenStem().combine(right.getHeavenStem());
+			if (stemCombine) {
+				rows.push(['天干五合', `${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${left.getHeavenStem().getName()}${right.getHeavenStem().getName()}合${stemCombine.getName()}`]);
+			}
+
+			for (const relation of branchPairRelations(leftBranch, right.getEarthBranch())) {
+				rows.push(['地支关系', `${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${relation}`]);
+			}
+		}
+	}
+
+	for (const [branchName, labels] of branchMap.entries()) {
+		if (labels.length > 1 && ['辰', '午', '酉', '亥'].includes(branchName)) {
+			rows.push(['地支自刑', `${labels.join('、')}: ${branchName}${branchName}自刑`]);
+		}
+	}
+
+	for (const combo of branchTripleCombos) {
+		if (combo.branches.every((branch) => branchMap.has(branch))) {
+			const locations = combo.branches.map((branch) => `${branch}:${(branchMap.get(branch) ?? []).join('/')}`).join('；');
+			rows.push([combo.type, `${combo.branches.join('')}成${combo.element}局（${locations}）`]);
+		}
+	}
+
+	if (rows.length === 0) return '刑冲合害: 未见明显天干五合、六合、三合、三会、六冲、六害、相刑、破。';
+	return mdTable(['类型', '关系'], rows);
+}
+
+function pairRelationSummary(left: SixtyCycle, right: SixtyCycle) {
+	const relations: string[] = [];
+	const stemCombine = left.getHeavenStem().combine(right.getHeavenStem());
+	if (stemCombine) relations.push(`${left.getHeavenStem().getName()}${right.getHeavenStem().getName()}合${stemCombine.getName()}`);
+	relations.push(...branchPairRelations(left.getEarthBranch(), right.getEarthBranch()));
+	return relations.length > 0 ? relations.join('、') : '无';
+}
+
+function specialCycles(eightChar: EightChar) {
+	return [
+		{ label: '胎元', cycle: eightChar.getFetalOrigin() },
+		{ label: '命宫', cycle: eightChar.getOwnSign() },
+		{ label: '身宫', cycle: eightChar.getBodySign() },
+	];
+}
+
+function formatSpecialCycleRelations(target: SixtyCycle, eightChar: EightChar) {
+	return specialCycles(eightChar)
+		.map((item) => `${item.label}${item.cycle.getName()}:${pairRelationSummary(item.cycle, target)}`)
+		.join('；');
+}
+
+type ElementName = '木' | '火' | '土' | '金' | '水';
+const elementNames: ElementName[] = ['木', '火', '土', '金', '水'];
+
+function calculateElementScores(eightChar: EightChar) {
+	const scores: Record<ElementName, number> = { 木: 0, 火: 0, 土: 0, 金: 0, 水: 0 };
+	const add = (name: string, value: number) => {
+		scores[name as ElementName] += value;
+	};
+
+	for (const cycle of Object.values(getPillarCycles(eightChar))) {
+		add(cycle.getHeavenStem().getElement().getName(), 1);
+		const branch = cycle.getEarthBranch();
+		add(branch.getElement().getName(), 1);
+		add(branch.getHideHeavenStemMain().getElement().getName(), 0.6);
+		const middle = branch.getHideHeavenStemMiddle();
+		if (middle) add(middle.getElement().getName(), 0.3);
+		const residual = branch.getHideHeavenStemResidual();
+		if (residual) add(residual.getElement().getName(), 0.1);
+	}
+
+	return scores;
+}
+
+function formatElementScoresTable(eightChar: EightChar) {
+	const scores = calculateElementScores(eightChar);
+	const total = elementNames.reduce((sum, name) => sum + scores[name], 0);
+	const dayElement = eightChar.getDay().getHeavenStem().getElement().getName();
+	const rows = elementNames.map((name) => [
+		name,
+		scores[name].toFixed(1),
+		`${((scores[name] / total) * 100).toFixed(1)}%`,
+		name === dayElement ? '日主五行' : '',
+	]);
+	return joinSections([
+		'计分: 天干=1，地支本五行=1，藏干本气/中气/余气=0.6/0.3/0.1',
+		mdTable(['五行', '分数', '占比', '备注'], rows),
+	]);
 }
 
 // ===== Tool Registration =====
@@ -269,7 +681,7 @@ function registerBaziChartTool(server: McpServer) {
 		'get_bazi_chart',
 		{
 			title: '八字排盘',
-			description: '八字命盘：获取四柱详情（十神、天干、地支、藏干、星运、自坐、空亡、纳音）、农历、节气、胎元、胎息、命宫、身宫、起运时间、大运列表。',
+			description: '八字命盘：获取四柱详情、农历、节气、神煞、刑冲合害、五行力量统计、胎元、胎息、命宫、身宫、起运时间、大运列表。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
 				gender: z.string().describe('性别：男/女 或 male/female'),
@@ -358,6 +770,9 @@ function registerBaziChartTool(server: McpServer) {
 				return textResult(joinSections([
 					`输入: ${datetime}\n公历: ${solarDay.toString()}\n农历: ${lunar}`,
 					formatPillarsTable(fourPillars),
+					joinSections(['命中神煞', formatShenshaTable(eightChar, true)]),
+					joinSections(['刑冲合害关系', formatRelationsTable(eightChar)]),
+					joinSections(['五行力量统计', formatElementScoresTable(eightChar)]),
 					mdTable(['节气', '时间'], [
 						[`当前${solarTerms.current.name}`, solarTerms.current.time],
 						[`下个${solarTerms.next.name}`, solarTerms.next.time],
@@ -388,12 +803,36 @@ function registerBaziChartTool(server: McpServer) {
 	);
 }
 
+function registerBaziShenshaTool(server: McpServer) {
+	server.registerTool(
+		'get_bazi_shensha',
+		{
+			title: '八字神煞',
+			description: '按年干/日干、年支/日支、月支起常用八字神煞，输出天乙贵人、文昌、羊刃、禄神、桃花、驿马、华盖、劫煞、将星、天德、月德等命中位置。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+			},
+		},
+		async ({ datetime }) => {
+			try {
+				const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
+				return textResult(joinSections([
+					`输入: ${datetime}\n公历: ${solarDay.toString()}\n农历: ${lunarDay.toString()}\n四柱: ${eightChar.toString()}`,
+					formatShenshaTable(eightChar),
+				]));
+			} catch (e) {
+				return errResult(`八字神煞错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+}
+
 function registerBaziFortuneTool(server: McpServer) {
 	server.registerTool(
 		'get_bazi_fortune',
 		{
 			title: '推算大运流年',
-			description: '八字小运与流年：输入出生信息和年份范围，获取每年的小运（个人年运）和流年（该年干支）及对应十神。',
+			description: '八字小运与流年：输入出生信息和年份范围，获取每年的大运、小运、流年、十神，以及流年与胎元/命宫/身宫的刑冲合害关系。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
 				gender: z.string().describe('性别：男/女 或 male/female'),
@@ -417,6 +856,7 @@ function registerBaziFortuneTool(server: McpServer) {
 					daYun: { sixtyCycle: string; tenGod: string } | null;
 					xiaoYun: { sixtyCycle: string; tenGod: string };
 					liuNian: { sixtyCycle: string; tenGod: string };
+					specialRelations: string;
 				}> = [];
 
 				// Iterate through Fortune objects
@@ -460,6 +900,7 @@ function registerBaziFortuneTool(server: McpServer) {
 						daYun: decadeInfo,
 						xiaoYun: { sixtyCycle: fortuneSc.getName(), tenGod: fortuneTenGod },
 						liuNian: { sixtyCycle: yearSc.getName(), tenGod: yearTenGod },
+						specialRelations: formatSpecialCycleRelations(yearSc, eightChar),
 					});
 
 					fortune = fortune.next(1);
@@ -476,6 +917,10 @@ function registerBaziFortuneTool(server: McpServer) {
 							`${item.xiaoYun.sixtyCycle}(${item.xiaoYun.tenGod})`,
 							`${item.liuNian.sixtyCycle}(${item.liuNian.tenGod})`,
 						]),
+					),
+					mdTable(
+						['年份', '流年', '胎元/命宫/身宫流年关系'],
+						results.map((item) => [item.year, item.liuNian.sixtyCycle, item.specialRelations]),
 					),
 				]));
 			} catch (e) {
@@ -498,7 +943,7 @@ function registerFlowMonthTool(server: McpServer) {
 		},
 		async ({ datetime, year }) => {
 			try {
-				const { dayMaster } = buildBaziContext(datetime);
+				const { eightChar, dayMaster } = buildBaziContext(datetime);
 				const scYear = SixtyCycleYear.fromYear(year);
 				const yearSc = scYear.getSixtyCycle();
 				const months = scYear.getMonths();
@@ -528,6 +973,7 @@ function registerFlowMonthTool(server: McpServer) {
 						sixtyCycle: sc.getName(),
 						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
 						nayin: sc.getSound().getName(),
+						specialRelations: formatSpecialCycleRelations(sc, eightChar),
 					};
 				});
 
@@ -542,6 +988,10 @@ function registerFlowMonthTool(server: McpServer) {
 							item.tenGod,
 							item.nayin,
 						]),
+					),
+					mdTable(
+						['流月', '干支', '胎元/命宫/身宫关系'],
+						flowMonths.map((item) => [item.monthName, item.sixtyCycle, item.specialRelations]),
 					),
 				]));
 			} catch (e) {
@@ -602,6 +1052,66 @@ function registerFlowDayTool(server: McpServer) {
 	);
 }
 
+function registerFlowHourTool(server: McpServer) {
+	server.registerTool(
+		'get_bazi_flow_hour',
+		{
+			title: '流时排盘',
+			description: '八字流时：输入出生日期和指定公历日期，获取当日12时辰的干支、十神、纳音、黄道十二神、九星与时辰宜忌。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				date: z.string().describe('查询日期 YYYY-MM-DD，如 "2024-01-15"'),
+			},
+		},
+		async ({ datetime, date }) => {
+			try {
+				const target = parseDate(date);
+				if (!target) throw new Error('Invalid date format. Use YYYY-MM-DD');
+				const { dayMaster } = buildBaziContext(datetime);
+				const solarDay = SolarDay.fromYmd(target.year, target.month, target.day);
+				const flowDay = SixtyCycleDay.fromSolarDay(solarDay);
+				const daySc = flowDay.getSixtyCycle();
+				const hours = flowDay.getHours().map((hour) => {
+					const sc = hour.getSixtyCycle();
+					const start = hour.getSolarTime();
+					const end = hour.next(7199).getSolarTime();
+					return {
+						timeRange: `${solarTimeMinuteText(start)} ~ ${solarTimeMinuteText(end)}`,
+						hourName: `${sc.getEarthBranch().getName()}时`,
+						sixtyCycle: sc.getName(),
+						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
+						nayin: sc.getSound().getName(),
+						twelveStar: hour.getTwelveStar().getName(),
+						nineStar: hour.getNineStar().toString(),
+						recommends: hour.getRecommends().map((item) => item.getName()).join('、'),
+						avoids: hour.getAvoids().map((item) => item.getName()).join('、'),
+					};
+				});
+
+				return textResult(joinSections([
+					`日期: ${date}\n流日: ${daySc.getName()}(${dayMaster.getTenStar(daySc.getHeavenStem()).getName()})\n日主: ${dayMaster.getName()}`,
+					mdTable(
+						['时间范围', '时辰', '干支', '十神', '纳音', '十二神', '九星', '宜', '忌'],
+						hours.map((item) => [
+							item.timeRange,
+							item.hourName,
+							item.sixtyCycle,
+							item.tenGod,
+							item.nayin,
+							item.twelveStar,
+							item.nineStar,
+							item.recommends,
+							item.avoids,
+						]),
+					),
+				]));
+			} catch (e) {
+				return errResult(`流时错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+}
+
 // ===== Server Creation =====
 
 function createServer() {
@@ -612,9 +1122,11 @@ function createServer() {
 
 	registerGanzhiTools(server);
 	registerBaziChartTool(server);
+	registerBaziShenshaTool(server);
 	registerBaziFortuneTool(server);
 	registerFlowMonthTool(server);
 	registerFlowDayTool(server);
+	registerFlowHourTool(server);
 
 	return server;
 }
@@ -625,15 +1137,17 @@ const allTools = [
 	{ name: 'convert_to_ganzhi', title: '公历转干支' },
 	{ name: 'get_current_ganzhi', title: '获取当前干支' },
 	{ name: 'get_bazi_chart', title: '八字排盘' },
+	{ name: 'get_bazi_shensha', title: '八字神煞' },
 	{ name: 'get_bazi_fortune', title: '推算大运流年' },
 	{ name: 'get_bazi_flow_month', title: '流月排盘' },
 	{ name: 'get_bazi_flow_day', title: '流日排盘' },
+	{ name: 'get_bazi_flow_hour', title: '流时排盘' },
 ];
 
 function serverInfoText() {
 	return joinSections([
 		'Lunar Calendar MCP Server',
-		'农历/公历转换、天干地支、八字命盘、大运小运流年流月流日',
+		'农历/公历转换、天干地支、八字命盘、大运小运流年流月流日流时、神煞、刑冲合害、五行统计',
 		'MCP endpoint: /lunar',
 		mdTable(['Tool', 'Title'], allTools.map((tool) => [tool.name, tool.title])),
 	]);
