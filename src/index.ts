@@ -39,12 +39,29 @@ function pad(n: number, len = 2) {
 	return String(n).padStart(len, '0');
 }
 
-function jsonResult(data: unknown) {
-	return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+function textResult(text: string) {
+	return { content: [{ type: 'text' as const, text }] };
 }
 
 function errResult(msg: string) {
 	return { content: [{ type: 'text' as const, text: msg }], isError: true };
+}
+
+function mdValue(value: unknown) {
+	const text = value === undefined || value === null || value === '' ? '-' : String(value);
+	return text.replace(/\r?\n/g, '<br>').replace(/\|/g, '\\|');
+}
+
+function mdTable(headers: string[], rows: unknown[][]) {
+	return [
+		`| ${headers.map(mdValue).join(' | ')} |`,
+		`| ${headers.map(() => '---').join(' | ')} |`,
+		...rows.map((row) => `| ${row.map(mdValue).join(' | ')} |`),
+	].join('\n');
+}
+
+function joinSections(sections: Array<string | undefined | null | false>) {
+	return sections.filter(Boolean).join('\n\n');
 }
 
 // ===== BaZi Core Helpers =====
@@ -172,6 +189,44 @@ function sixtyCycleWithNayin(sc: SixtyCycle) {
 	return { sixtyCycle: sc.getName(), nayin: sc.getSound().getName() };
 }
 
+type PillarInfo = ReturnType<typeof pillarDetail>;
+type CycleWithNayin = ReturnType<typeof sixtyCycleWithNayin>;
+
+function hiddenStemsText(pillar: PillarInfo) {
+	return pillar.hiddenStems.map(({ stem, tenGod }) => `${stem}(${tenGod})`).join(' ');
+}
+
+function cycleNayinText(item: CycleWithNayin) {
+	return `${item.sixtyCycle}(${item.nayin})`;
+}
+
+function formatGanzhiResult(title: string, datetime: string, solar: string, lunar: string, eightChar: EightChar) {
+	return joinSections([
+		`${title}: ${datetime}\n公历: ${solar}\n农历: ${lunar}`,
+		mdTable(['年柱', '月柱', '日柱', '时柱', '完整四柱'], [
+			[
+				eightChar.getYear().getName(),
+				eightChar.getMonth().getName(),
+				eightChar.getDay().getName(),
+				eightChar.getHour().getName(),
+				eightChar.toString(),
+			],
+		]),
+	]);
+}
+
+function formatPillarsTable(fourPillars: Record<'year' | 'month' | 'day' | 'hour', PillarInfo>) {
+	return mdTable(
+		['柱', '干支', '十神', '天干', '地支', '藏干', '星运', '自坐', '空亡', '纳音'],
+		[
+			['年柱', fourPillars.year.pillar, fourPillars.year.tenGod, fourPillars.year.heavenStem, fourPillars.year.earthBranch, hiddenStemsText(fourPillars.year), fourPillars.year.terrain, fourPillars.year.selfSitting, fourPillars.year.kongwang.join(''), fourPillars.year.nayin],
+			['月柱', fourPillars.month.pillar, fourPillars.month.tenGod, fourPillars.month.heavenStem, fourPillars.month.earthBranch, hiddenStemsText(fourPillars.month), fourPillars.month.terrain, fourPillars.month.selfSitting, fourPillars.month.kongwang.join(''), fourPillars.month.nayin],
+			['日柱', fourPillars.day.pillar, fourPillars.day.tenGod, fourPillars.day.heavenStem, fourPillars.day.earthBranch, hiddenStemsText(fourPillars.day), fourPillars.day.terrain, fourPillars.day.selfSitting, fourPillars.day.kongwang.join(''), fourPillars.day.nayin],
+			['时柱', fourPillars.hour.pillar, fourPillars.hour.tenGod, fourPillars.hour.heavenStem, fourPillars.hour.earthBranch, hiddenStemsText(fourPillars.hour), fourPillars.hour.terrain, fourPillars.hour.selfSitting, fourPillars.hour.kongwang.join(''), fourPillars.hour.nayin],
+		],
+	);
+}
+
 // ===== Tool Registration =====
 
 function registerGanzhiTools(server: McpServer) {
@@ -185,18 +240,7 @@ function registerGanzhiTools(server: McpServer) {
 		async ({ datetime }) => {
 			try {
 				const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
-				return jsonResult({
-					input: datetime,
-					solar: solarDay.toString(),
-					lunar: lunarDay.toString(),
-					ganZhi: {
-						year: eightChar.getYear().getName(),
-						month: eightChar.getMonth().getName(),
-						day: eightChar.getDay().getName(),
-						hour: eightChar.getHour().getName(),
-						full: eightChar.toString(),
-					},
-				});
+				return textResult(formatGanzhiResult('输入', datetime, solarDay.toString(), lunarDay.toString(), eightChar));
 			} catch (e) {
 				return errResult(`转换错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -215,18 +259,7 @@ function registerGanzhiTools(server: McpServer) {
 			const now = new Date(Date.now() + 8 * 3600_000);
 			const datetime = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
 			const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
-			return jsonResult({
-				currentTime: datetime,
-				solar: solarDay.toString(),
-				lunar: lunarDay.toString(),
-				ganZhi: {
-					year: eightChar.getYear().getName(),
-					month: eightChar.getMonth().getName(),
-					day: eightChar.getDay().getName(),
-					hour: eightChar.getHour().getName(),
-					full: eightChar.toString(),
-				},
-			});
+			return textResult(formatGanzhiResult('当前', datetime, solarDay.toString(), lunarDay.toString(), eightChar));
 		},
 	);
 }
@@ -285,7 +318,17 @@ function registerBaziChartTool(server: McpServer) {
 
 				// 大运
 				const birthYear = dt.year;
-				const majorLuck: unknown[] = [];
+				const majorLuck: Array<{
+					type?: string;
+					sixtyCycle?: string;
+					tenGod?: string;
+					nayin?: string;
+					startAge?: number;
+					endAge?: number;
+					startYear: number;
+					endYear: number;
+					ageRange: string;
+				}> = [];
 
 				// 童限
 				majorLuck.push({
@@ -312,19 +355,32 @@ function registerBaziChartTool(server: McpServer) {
 					decade = decade.next(1);
 				}
 
-				return jsonResult({
-					input: datetime,
-					solar: solarDay.toString(),
-					lunar,
-					fourPillars,
-					solarTerms,
-					fetalOrigin,
-					fetalBreath,
-					lifePalace,
-					bodyPalace,
-					startLuck,
-					majorLuck,
-				});
+				return textResult(joinSections([
+					`输入: ${datetime}\n公历: ${solarDay.toString()}\n农历: ${lunar}`,
+					formatPillarsTable(fourPillars),
+					mdTable(['节气', '时间'], [
+						[`当前${solarTerms.current.name}`, solarTerms.current.time],
+						[`下个${solarTerms.next.name}`, solarTerms.next.time],
+					]),
+					mdTable(['胎元', '胎息', '命宫', '身宫'], [[
+						cycleNayinText(fetalOrigin),
+						cycleNayinText(fetalBreath),
+						cycleNayinText(lifePalace),
+						cycleNayinText(bodyPalace),
+					]]),
+					`起运: ${startLuck.description}\n起运日期: ${startLuck.startDate}`,
+					mdTable(
+						['运', '干支', '十神', '纳音', '年龄', '年份'],
+						majorLuck.map((luck, index) => [
+							luck.type ?? `第${index}步`,
+							luck.sixtyCycle,
+							luck.tenGod,
+							luck.nayin,
+							luck.ageRange,
+							`${luck.startYear}-${luck.endYear}`,
+						]),
+					),
+				]));
 			} catch (e) {
 				return errResult(`八字命盘错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -355,7 +411,13 @@ function registerBaziFortuneTool(server: McpServer) {
 
 				// Find the starting fortune index: age = startYear - birthYear + 1
 				const startAge = startYear - birthYear + 1;
-				const results: unknown[] = [];
+				const results: Array<{
+					year: number;
+					age: number;
+					daYun: { sixtyCycle: string; tenGod: string } | null;
+					xiaoYun: { sixtyCycle: string; tenGod: string };
+					liuNian: { sixtyCycle: string; tenGod: string };
+				}> = [];
 
 				// Iterate through Fortune objects
 				let fortune = childLimit.getStartFortune();
@@ -403,12 +465,19 @@ function registerBaziFortuneTool(server: McpServer) {
 					fortune = fortune.next(1);
 				}
 
-				return jsonResult({
-					birthYear,
-					dayMaster: dayMaster.getName(),
-					queryRange: { startYear, count },
-					fortunes: results,
-				});
+				return textResult(joinSections([
+					`出生年: ${birthYear}\n日主: ${dayMaster.getName()}\n查询: ${startYear}起 ${count}年`,
+					mdTable(
+						['年份', '年龄', '大运', '小运', '流年'],
+						results.map((item) => [
+							item.year,
+							`${item.age}岁`,
+							item.daYun ? `${item.daYun.sixtyCycle}(${item.daYun.tenGod})` : '-',
+							`${item.xiaoYun.sixtyCycle}(${item.xiaoYun.tenGod})`,
+							`${item.liuNian.sixtyCycle}(${item.liuNian.tenGod})`,
+						]),
+					),
+				]));
 			} catch (e) {
 				return errResult(`小运流年错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -462,12 +531,19 @@ function registerFlowMonthTool(server: McpServer) {
 					};
 				});
 
-				return jsonResult({
-					year,
-					yearSixtyCycle: yearSc.getName(),
-					dayMaster: dayMaster.getName(),
-					flowMonths,
-				});
+				return textResult(joinSections([
+					`年份: ${year} ${yearSc.getName()}\n日主: ${dayMaster.getName()}`,
+					mdTable(
+						['流月', '公历范围', '干支', '十神', '纳音'],
+						flowMonths.map((item) => [
+							item.monthName,
+							item.solarDateRange,
+							item.sixtyCycle,
+							item.tenGod,
+							item.nayin,
+						]),
+					),
+				]));
 			} catch (e) {
 				return errResult(`流月错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -493,7 +569,12 @@ function registerFlowDayTool(server: McpServer) {
 
 				// Determine days in the Gregorian month
 				const daysInMonth = new Date(year, month, 0).getDate();
-				const flowDays: unknown[] = [];
+				const flowDays: Array<{
+					date: string;
+					sixtyCycle: string;
+					tenGod: string;
+					nayin: string;
+				}> = [];
 
 				for (let d = 1; d <= daysInMonth; d++) {
 					const solarDay = SolarDay.fromYmd(year, month, d);
@@ -507,12 +588,13 @@ function registerFlowDayTool(server: McpServer) {
 					});
 				}
 
-				return jsonResult({
-					year,
-					month,
-					dayMaster: dayMaster.getName(),
-					flowDays,
-				});
+				return textResult(joinSections([
+					`月份: ${year}-${pad(month)}\n日主: ${dayMaster.getName()}`,
+					mdTable(
+						['日期', '干支', '十神', '纳音'],
+						flowDays.map((item) => [item.date, item.sixtyCycle, item.tenGod, item.nayin]),
+					),
+				]));
 			} catch (e) {
 				return errResult(`流日错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -539,14 +621,23 @@ function createServer() {
 
 // ===== Export =====
 
-const allToolNames = [
-	'convert_to_ganzhi',
-	'get_current_ganzhi',
-	'get_bazi_chart',
-	'get_bazi_fortune',
-	'get_bazi_flow_month',
-	'get_bazi_flow_day',
+const allTools = [
+	{ name: 'convert_to_ganzhi', title: '公历转干支' },
+	{ name: 'get_current_ganzhi', title: '获取当前干支' },
+	{ name: 'get_bazi_chart', title: '八字排盘' },
+	{ name: 'get_bazi_fortune', title: '推算大运流年' },
+	{ name: 'get_bazi_flow_month', title: '流月排盘' },
+	{ name: 'get_bazi_flow_day', title: '流日排盘' },
 ];
+
+function serverInfoText() {
+	return joinSections([
+		'Lunar Calendar MCP Server',
+		'农历/公历转换、天干地支、八字命盘、大运小运流年流月流日',
+		'MCP endpoint: /lunar',
+		mdTable(['Tool', 'Title'], allTools.map((tool) => [tool.name, tool.title])),
+	]);
+}
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -557,16 +648,8 @@ export default {
 			return createMcpHandler(server, { route: '/lunar' })(request, env, ctx);
 		}
 
-		return new Response(
-			JSON.stringify({
-				name: 'Lunar Calendar MCP Server',
-				description: '农历/公历转换、天干地支、八字命盘、大运小运流年流月流日',
-				mcp_endpoint: '/lunar',
-				tools: allToolNames,
-			}),
-			{
-				headers: { 'Content-Type': 'application/json; charset=utf-8' },
-			},
-		);
+		return new Response(serverInfoText(), {
+			headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+		});
 	},
 } satisfies ExportedHandler<Env>;
