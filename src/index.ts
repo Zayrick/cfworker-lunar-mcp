@@ -14,7 +14,9 @@ import {
 	ChildLimit,
 	Gender,
 	SixtyCycleYear,
+	SixtyCycleMonth,
 	SixtyCycleDay,
+	SixtyCycleHour,
 	EightChar,
 	HeavenStem,
 	EarthBranch,
@@ -407,14 +409,27 @@ function buildZiweiHoroscope(
 	if (!target) throw new Error('Invalid targetDatetime format. Use YYYY-MM-DD HH:MM');
 	const chart = buildZiweiChart(birthDatetime, gender, profileInput, calendarInput, isLeapMonth, languageInput);
 	const targetTimeIndex = ziweiTimeIndex(target);
+	const targetSolarTime = SolarTime.fromYmdHms(target.year, target.month, target.day, target.hour, target.minute, 0);
 	const horoscope = chart.astrolabe.horoscope(ziweiDateString(target), targetTimeIndex);
 	return {
 		...chart,
 		target,
 		targetDatetime,
 		targetTimeIndex,
+		targetSolarTime,
 		horoscope,
 	};
+}
+
+function ziweiScopeSolarRange(scope: ZiweiScope, targetSolarTime: SolarTime) {
+	const hour = targetSolarTime.getSixtyCycleHour();
+	const day = hour.getSixtyCycleDay();
+	const month = day.getSixtyCycleMonth();
+	if (scope === 'yearly') return sixtyCycleYearSolarRange(month.getSixtyCycleYear());
+	if (scope === 'monthly') return sixtyCycleMonthSolarRange(month);
+	if (scope === 'daily') return sixtyCycleDaySolarRange(day);
+	if (scope === 'hourly') return sixtyCycleHourSolarRange(hour);
+	return '-';
 }
 
 // ===== BaZi Core Helpers =====
@@ -555,6 +570,57 @@ function cycleNayinText(item: CycleWithNayin) {
 
 function solarTimeMinuteText(t: SolarTime) {
 	return `${t.getYear()}-${pad(t.getMonth())}-${pad(t.getDay())} ${pad(t.getHour())}:${pad(t.getMinute())}`;
+}
+
+function solarTimeSecondText(t: SolarTime) {
+	return `${solarTimeMinuteText(t)}:${pad(t.getSecond())}`;
+}
+
+function solarRangeText(start: SolarTime, end: SolarTime) {
+	return `${solarTimeSecondText(start)} 至 ${solarTimeSecondText(end)}`;
+}
+
+function sixtyCycleMonthStartTime(month: SixtyCycleMonth) {
+	return SolarTerm
+		.fromIndex(month.getSixtyCycleYear().getYear(), 3 + month.getIndexInYear() * 2)
+		.getJulianDay()
+		.getSolarTime();
+}
+
+function sixtyCycleYearSolarRange(year: SixtyCycleYear) {
+	const start = sixtyCycleMonthStartTime(year.getFirstMonth());
+	const end = sixtyCycleMonthStartTime(year.next(1).getFirstMonth()).next(-1);
+	return solarRangeText(start, end);
+}
+
+function sixtyCycleMonthSolarRange(month: SixtyCycleMonth) {
+	const start = sixtyCycleMonthStartTime(month);
+	const end = sixtyCycleMonthStartTime(month.next(1)).next(-1);
+	return solarRangeText(start, end);
+}
+
+function sixtyCycleDaySolarRange(day: SixtyCycleDay) {
+	const hours = day.getHours();
+	if (hours.length === 0) return '-';
+	const start = hours[0].getSolarTime();
+	const end = hours[hours.length - 1].getSolarTime().next(7199);
+	return solarRangeText(start, end);
+}
+
+function startOfSixtyCycleHour(solarTime: SolarTime) {
+	const hour = solarTime.getHour();
+	if (hour === 0) {
+		return SolarTime
+			.fromYmdHms(solarTime.getYear(), solarTime.getMonth(), solarTime.getDay(), 0, 0, 0)
+			.next(-3600);
+	}
+	const startHour = hour === 23 ? 23 : Math.floor((hour + 1) / 2) * 2 - 1;
+	return SolarTime.fromYmdHms(solarTime.getYear(), solarTime.getMonth(), solarTime.getDay(), startHour, 0, 0);
+}
+
+function sixtyCycleHourSolarRange(hour: SixtyCycleHour) {
+	const start = startOfSixtyCycleHour(hour.getSolarTime());
+	return solarRangeText(start, start.next(7199));
 }
 
 function formatGanzhiResult(title: string, datetime: string, solar: string, lunar: string, eightChar: EightChar) {
@@ -1898,8 +1964,9 @@ function buildBaziTimelineData(datetime: string, gender: string, startYear: numb
 	for (let i = 0; i < count; i++) {
 		const age = fortune.getAge();
 		const year = birthYear + age - 1;
+		const sixtyCycleYear = fortune.getSixtyCycleYear();
 		const xiaoYunSc = fortune.getSixtyCycle();
-		const yearSc = fortune.getSixtyCycleYear().getSixtyCycle();
+		const yearSc = sixtyCycleYear.getSixtyCycle();
 		let decadeInfo: Record<string, unknown> | null = null;
 		let dec = childLimit.getStartDecadeFortune();
 		for (let d = 0; d < 10; d++) {
@@ -1918,6 +1985,7 @@ function buildBaziTimelineData(datetime: string, gender: string, startYear: numb
 
 		rows.push({
 			year,
+			solarRange: sixtyCycleYearSolarRange(sixtyCycleYear),
 			age,
 			decade: decadeInfo,
 			xiaoYun: {
@@ -1942,13 +2010,14 @@ function formatBaziTimelineMarkdown(data: ReturnType<typeof buildBaziTimelineDat
 		'八字大运流年时间轴',
 		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n查询: ${data.startYear} 起 ${data.count} 年`,
 		mdTable(
-			['年份', '年龄', '大运', '小运', '流年'],
+			['年份', '公历实际对应范围', '年龄', '大运', '小运', '流年'],
 			data.rows.map((row) => {
 				const decade = row.decade as Record<string, unknown> | null;
 				const xiaoYun = row.xiaoYun as Record<string, unknown>;
 				const liuNian = row.liuNian as Record<string, unknown>;
 				return [
 					row.year,
+					row.solarRange,
 					`${row.age}岁`,
 					decade ? `${decade.sixtyCycle}(${decade.tenGod}) ${decade.startAge}-${decade.endAge}岁` : '-',
 					`${xiaoYun.sixtyCycle}(${xiaoYun.tenGod})`,
@@ -1993,13 +2062,15 @@ function buildBaziPeriodData(
 
 	if (scope === 'year') {
 		if (!year) throw new Error('scope=year requires year.');
-		const sc = SixtyCycleYear.fromYear(year).getSixtyCycle();
+		const scYear = SixtyCycleYear.fromYear(year);
+		const sc = scYear.getSixtyCycle();
 		target = {
 			scope,
 			label: `${year}年`,
 			sixtyCycle: sc.getName(),
 			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
 			nayin: sc.getSound().getName(),
+			solarRange: sixtyCycleYearSolarRange(scYear),
 			originalRelations: relationAgainstOriginal(sc, eightChar),
 			timeline: buildBaziTimelineData(datetime, gender, year, 1).rows[0],
 		};
@@ -2014,6 +2085,7 @@ function buildBaziPeriodData(
 			sixtyCycle: sc.getName(),
 			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
 			nayin: sc.getSound().getName(),
+			solarRange: sixtyCycleMonthSolarRange(scMonth),
 			originalRelations: relationAgainstOriginal(sc, eightChar),
 			specialRelations: formatSpecialCycleRelations(sc, eightChar),
 		};
@@ -2030,6 +2102,7 @@ function buildBaziPeriodData(
 			nayin: sc.getSound().getName(),
 			twelveStar: scDay.getTwelveStar().getName(),
 			nineStar: scDay.getNineStar().toString(),
+			solarRange: sixtyCycleDaySolarRange(scDay),
 			recommends: scDay.getRecommends().map((item) => item.getName()),
 			avoids: scDay.getAvoids().map((item) => item.getName()),
 			originalRelations: relationAgainstOriginal(sc, eightChar),
@@ -2049,6 +2122,7 @@ function buildBaziPeriodData(
 			nayin: sc.getSound().getName(),
 			twelveStar: scHour.getTwelveStar().getName(),
 			nineStar: scHour.getNineStar().toString(),
+			solarRange: sixtyCycleHourSolarRange(scHour),
 			recommends: scHour.getRecommends().map((item) => item.getName()),
 			avoids: scHour.getAvoids().map((item) => item.getName()),
 			originalRelations: relationAgainstOriginal(sc, eightChar),
@@ -2067,7 +2141,7 @@ function formatBaziPeriodMarkdown(data: ReturnType<typeof buildBaziPeriodData>) 
 	const liuNian = timeline?.liuNian as Record<string, unknown> | undefined;
 	return joinSections([
 		'八字单一周期详盘',
-		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n周期层级: ${data.target.scope}\n周期: ${data.target.label}\n干支: ${data.target.sixtyCycle}(${data.target.tenGod})\n纳音: ${data.target.nayin}`,
+		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n周期层级: ${data.target.scope}\n周期: ${data.target.label}\n干支: ${data.target.sixtyCycle}(${data.target.tenGod})\n纳音: ${data.target.nayin}\n公历实际对应范围: ${data.target.solarRange}`,
 		data.target.twelveStar || data.target.nineStar ? `十二建星: ${data.target.twelveStar ?? '-'}\n九星: ${data.target.nineStar ?? '-'}` : undefined,
 		timeline ? mdTable(['年份', '年龄', '大运', '小运', '流年', '胎元/命宫/身宫关系'], [[
 			timeline.year,
@@ -2335,6 +2409,7 @@ function buildZiweiHoroscopeOverviewData(
 				scope,
 				label: scope === 'age' ? `${ziweiScopeLabels[scope]}(${ctx.horoscope.age.nominalAge}虚岁)` : ziweiScopeLabels[scope],
 				branch: horoscopeItemBranch(item),
+				solarRange: ziweiScopeSolarRange(scope, ctx.targetSolarTime),
 				originPalace: palaceLabel(ctx.astrolabe, item.index),
 				mutagens: item.mutagen,
 				starPalaceCount: item.stars ? item.stars.filter((stars) => stars.length > 0).length : 0,
@@ -2347,9 +2422,10 @@ function formatZiweiHoroscopeOverviewMarkdown(data: ReturnType<typeof buildZiwei
 	return joinSections([
 		'紫微运限总览',
 		`出生: ${data.birthDatetime} (${data.ctx.calendar === 'solar' ? '公历' : '农历'})\n目标: ${data.targetDatetime}\n目标公历: ${data.ctx.horoscope.solarDate}\n目标农历: ${data.ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[data.ctx.profile]} (${data.ctx.profile})\n目标时辰索引: ${data.ctx.targetTimeIndex}`,
-		mdTable(['层级', '干支', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
+		mdTable(['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
 			item.label,
 			item.branch,
+			item.solarRange,
 			item.originPalace,
 			item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
 			item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',
@@ -2395,12 +2471,13 @@ function buildZiweiScopeDetailData(
 		focusPalace,
 		item: {
 			branch: horoscopeItemBranch(item),
+			solarRange: ziweiScopeSolarRange(scope, ctx.targetSolarTime),
 			originPalace: palaceLabel(ctx.astrolabe, item.index),
 			mutagens: item.mutagen,
 			nominalAge: scope === 'age' ? ctx.horoscope.age.nominalAge : null,
 		},
 		palaces,
-		focus,
+		focus, 
 	};
 }
 
@@ -2408,9 +2485,10 @@ function formatZiweiScopeDetailMarkdown(data: ReturnType<typeof buildZiweiScopeD
 	return joinSections([
 		'紫微单层运限详盘',
 		`层级: ${ziweiScopeLabels[data.scope]}\n重点宫位: ${data.focusPalace}\n出生: ${data.birthDatetime}\n目标: ${data.targetDatetime}\n目标公历: ${data.ctx.horoscope.solarDate}\n目标农历: ${data.ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[data.ctx.profile]} (${data.ctx.profile})`,
-		mdTable(['层级', '干支', '所在原盘宫', '四化', '虚岁'], [[
+		mdTable(['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '虚岁'], [[
 			ziweiScopeLabels[data.scope],
 			data.item.branch,
+			data.item.solarRange,
 			data.item.originPalace,
 			data.item.mutagens.length > 0 ? data.item.mutagens.join('、') : '-',
 			data.item.nominalAge ? `${data.item.nominalAge}虚岁` : '-',
@@ -2504,9 +2582,10 @@ function formatZiweiTopicContextMarkdown(data: ReturnType<typeof buildZiweiTopic
 	return joinSections([
 		'紫微专题取证',
 		`专题: ${data.topic}\n出生: ${data.birthDatetime}\n目标: ${data.targetDatetime}\n相关宫位: ${data.topicPalaces.join('、')}\n流派: ${ziweiProfileLabels[data.runtime.profile]} (${data.runtime.profile})\n历法: ${data.runtime.calendar === 'solar' ? '公历' : '农历'}\n目标公历: ${data.runtime.targetSolarDate}\n目标农历: ${data.runtime.targetLunarDate}\n目标时辰索引: ${data.runtime.targetTimeIndex}`,
-		mdTable(['层级', '干支', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
+		mdTable(['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
 			item.label,
 			item.branch,
+			item.solarRange,
 			item.originPalace,
 			item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
 			item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',

@@ -261,6 +261,77 @@ describe('Lunar Calendar MCP Server', () => {
 		expectMarkdownResult(result, expectedSummary);
 	});
 
+	it('includes Gregorian ranges for runtime ganzhi year month day and hour outputs', async () => {
+		const timeline = await callTool('bazi_timeline', {
+			datetime: '2024-01-15 08:30',
+			gender: '男',
+			startYear: 2026,
+			count: 1,
+		});
+		const timelineText = expectMarkdownResult(timeline, '八字大运流年时间轴');
+		expect(timelineText).toContain('| 年份 | 公历实际对应范围 | 年龄 |');
+		expect(timelineText).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 至 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+
+		const year = await callTool('bazi_period_detail', {
+			datetime: '2024-01-15 08:30',
+			gender: '男',
+			scope: 'year',
+			year: 2026,
+		});
+		const yearText = expectMarkdownResult(year, '八字单一周期详盘');
+		expect(yearText).toContain('公历实际对应范围:');
+
+		const month = await callTool('bazi_period_detail', {
+			datetime: '2024-01-15 08:30',
+			gender: '男',
+			scope: 'month',
+			year: 2026,
+			month: 5,
+		});
+		const monthText = expectMarkdownResult(month, '八字单一周期详盘');
+		expect(monthText).toContain('公历实际对应范围:');
+		expect(monthText).toMatch(/2026-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 至 2026-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+
+		const day = await callTool('bazi_period_detail', {
+			datetime: '2024-01-15 08:30',
+			gender: '男',
+			scope: 'day',
+			date: '2026-06-12',
+		});
+		const dayText = expectMarkdownResult(day, '八字单一周期详盘');
+		expect(dayText).toContain('公历实际对应范围:');
+		expect(dayText).toMatch(/2026-06-\d{2} \d{2}:\d{2}:\d{2} 至 2026-06-\d{2} \d{2}:\d{2}:\d{2}/);
+
+		const hour = await callTool('bazi_period_detail', {
+			datetime: '2024-01-15 08:30',
+			gender: '男',
+			scope: 'hour',
+			date: '2026-06-12',
+			hour: 18,
+		});
+		const hourText = expectMarkdownResult(hour, '八字单一周期详盘');
+		expect(hourText).toContain('公历实际对应范围: 2026-06-12 17:00:00 至 2026-06-12 18:59:59');
+
+		const ziwei = await callTool('ziwei_horoscope_overview', {
+			birthDatetime: '2024-01-15 08:30',
+			gender: '男',
+			targetDatetime: '2026-06-12 18:00',
+		});
+		const ziweiText = expectMarkdownResult(ziwei, '紫微运限总览');
+		expect(ziweiText).toContain('| 层级 | 干支 | 公历实际对应范围 |');
+		expect(ziweiText).toContain('| 流日 |');
+		expect(ziweiText).toContain('2026-06-12 17:00:00 至 2026-06-12 18:59:59');
+
+		const liuyao = await callTool('liuyao_chart', {
+			question: '这次合作能不能成',
+			datetime: '2026-06-12 18:00',
+			originalHexagram: '火泽睽',
+			changedHexagram: '火雷噬嗑',
+		});
+		const liuyaoText = expectMarkdownResult(liuyao, '六爻排盘');
+		expect(liuyaoText).not.toContain('公历实际对应范围');
+	});
+
 	it('keeps ziwei topic context compact and points to detail tools in markdown', async () => {
 		const result = await callTool('ziwei_topic_context', {
 			birthDatetime: '2024-01-15 08:30',
@@ -272,6 +343,7 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(text.length).toBeLessThan(6000);
 		for (const palace of ['官禄', '迁移', '财帛', '福德']) expect(text).toContain(`| ${palace} |`);
 		expect(text).toContain('目标公历');
+		expect(text).toContain('公历实际对应范围');
 		expect(text).toContain('本命飞化');
 		expect(text).toContain('建议调用');
 		expect(text).toContain('ziwei_palace_detail(palace=官禄)');
@@ -288,6 +360,7 @@ describe('Lunar Calendar MCP Server', () => {
 		const structureText = expectMarkdownResult(structure, '八字命局结构证据');
 		expect(structureText).toContain('不输出最终断命结论');
 		expect(structureText).not.toMatch(/最终断命结论[:：]/);
+		expect(structureText).not.toContain('公历实际对应范围');
 
 		const overview = await callTool('ziwei_horoscope_overview', {
 			birthDatetime: '2024-01-15 08:30',
