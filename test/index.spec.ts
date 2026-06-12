@@ -10,6 +10,7 @@ const newToolNames = [
 	'bazi_timeline',
 	'bazi_period_detail',
 	'bazi_shensha',
+	'liuyao_chart',
 	'ziwei_chart',
 	'ziwei_palace_detail',
 	'ziwei_horoscope_overview',
@@ -159,6 +160,7 @@ describe('Lunar Calendar MCP Server', () => {
 			bazi_timeline: '八字大运流年',
 			bazi_period_detail: '八字周期详盘',
 			bazi_shensha: '八字神煞参考',
+			liuyao_chart: '六爻排盘',
 			ziwei_chart: '紫微斗数排盘',
 			ziwei_palace_detail: '紫微宫位详盘',
 			ziwei_horoscope_overview: '紫微运限概览',
@@ -202,6 +204,16 @@ describe('Lunar Calendar MCP Server', () => {
 			name: 'bazi_shensha',
 			args: { datetime: '2024-01-15 08:30' },
 			expectedSummary: '常用八字神煞辅助表',
+		},
+		{
+			name: 'liuyao_chart',
+			args: {
+				question: '这次合作能不能成',
+				datetime: '2026-06-12 18:00',
+				originalHexagram: '火泽睽',
+				changedHexagram: '火雷噬嗑',
+			},
+			expectedSummary: '六爻排盘',
 		},
 		{
 			name: 'ziwei_chart',
@@ -287,10 +299,37 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(overviewText).toContain('下一步必须调用 ziwei_scope_detail');
 	});
 
+	it('returns liuyao chart details with main and changed hexagram tables', async () => {
+		const result = await callTool('liuyao_chart', {
+			question: '这次合作能不能成',
+			datetime: '2026-06-12 18:00',
+			originalHexagram: '火泽睽',
+			changedHexagram: '火雷噬嗑',
+		});
+		const text = expectMarkdownResult(result, '六爻排盘');
+		expect(text).toContain('所问之事：这次合作能不能成');
+		expect(text).toContain('干支:');
+		expect(text).toContain('空亡：年空亡');
+		expect(text).toContain('卦身：');
+		expect(text).toContain('世身：');
+		expect(text).toContain('主卦：火泽睽');
+		expect(text).toContain('变卦：火雷噬嗑');
+		expect(text).toContain('| 爻位 | 六神 | 六亲 | 干支 | 世应 | 伏神 | 是否变卦 | 神煞 | 长生 |');
+		expect(text).toContain('| 三爻 ━ ━ 阴 |');
+		expect(text).toContain('| 是 |');
+		expect(text).toContain('六亲、世应沿用主卦艮宫土');
+	});
+
 	it.each([
 		['invalid date', 'bazi_chart', { datetime: 'not-a-date', gender: '男' }],
 		['invalid gender', 'bazi_chart', { datetime: '2024-01-15 08:30', gender: 'unknown' }],
 		['invalid scope', 'bazi_period_detail', { datetime: '2024-01-15 08:30', gender: '男', scope: 'week', date: '2026-06-12' }],
+		['invalid liuyao hexagram', 'liuyao_chart', {
+			question: '测试',
+			datetime: '2026-06-12 18:00',
+			originalHexagram: '不存在卦',
+			changedHexagram: '乾为天',
+		}],
 		['invalid topic', 'ziwei_topic_context', {
 			birthDatetime: '2024-01-15 08:30',
 			gender: '男',
