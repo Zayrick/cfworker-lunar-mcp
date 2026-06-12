@@ -48,7 +48,10 @@ function parseDate(date: string) {
 }
 
 function toGender(g: string): Gender {
-	return g === '男' || g.toLowerCase() === 'male' ? Gender.MAN : Gender.WOMAN;
+	const value = g.trim().toLowerCase();
+	if (value === '男' || value === 'male' || value === 'm') return Gender.MAN;
+	if (value === '女' || value === 'female' || value === 'f') return Gender.WOMAN;
+	throw new Error('Invalid gender. Use 男/女 or male/female.');
 }
 
 function pad(n: number, len = 2) {
@@ -57,6 +60,29 @@ function pad(n: number, len = 2) {
 
 function textResult(text: string) {
 	return { content: [{ type: 'text' as const, text }] };
+}
+
+type StructuredToolPayload = {
+	ok: boolean;
+	kind: string;
+	summary: string;
+	data: Record<string, unknown>;
+	warnings?: string[];
+};
+
+const standardOutputSchema = z.object({
+	ok: z.boolean(),
+	kind: z.string(),
+	summary: z.string(),
+	data: z.record(z.string(), z.unknown()),
+	warnings: z.array(z.string()).optional(),
+});
+
+function structuredResult(payload: StructuredToolPayload) {
+	return {
+		content: [],
+		structuredContent: payload,
+	};
 }
 
 function errResult(msg: string) {
@@ -979,579 +1005,1262 @@ function formatElementScoresTable(eightChar: EightChar) {
 
 // ===== Tool Registration =====
 
-function registerGanzhiTools(server: McpServer) {
-	server.registerTool(
-		'convert_to_ganzhi',
-		{
-			title: '公历转干支',
-			description: '将公历日期时间转换为天干地支（四柱/八字）及农历日期。Convert Gregorian date-time to 天干地支 four pillars.',
-			inputSchema: { datetime: z.string().describe('日期时间 YYYY-MM-DD HH:MM，如 "2024-01-15 08:30"') },
-		},
-		async ({ datetime }) => {
-			try {
-				const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
-				return textResult(formatGanzhiResult('输入', datetime, solarDay.toString(), lunarDay.toString(), eightChar));
-			} catch (e) {
-				return errResult(`转换错误: ${e instanceof Error ? e.message : String(e)}`);
-			}
-		},
-	);
+const baziPeriodScopes = ['year', 'month', 'day', 'hour'] as const;
+type BaziPeriodScope = typeof baziPeriodScopes[number];
 
-	server.registerTool(
-		'get_current_ganzhi',
-		{
-			title: '获取当前干支',
-			description: '获取当前日期时间的天干地支（四柱/八字）。Get current date-time\'s 天干地支 four pillars.',
-			inputSchema: {},
-		},
-		async () => {
-			// Use UTC+8 (China Standard Time) instead of UTC
-			const now = new Date(Date.now() + 8 * 3600_000);
-			const datetime = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
-			const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
-			return textResult(formatGanzhiResult('当前', datetime, solarDay.toString(), lunarDay.toString(), eightChar));
-		},
-	);
+const ziweiTopics = ['self', 'career', 'wealth', 'relationship', 'health', 'family'] as const;
+type ZiweiTopic = typeof ziweiTopics[number];
+
+const mutagenNames = ['禄', '权', '科', '忌'] as const;
+
+function normalizeBaziPeriodScope(scope: string): BaziPeriodScope {
+	if (isOneOf(scope, baziPeriodScopes)) return scope;
+	throw new Error('Unsupported scope. Use year, month, day, or hour.');
 }
 
-function registerBaziChartTool(server: McpServer) {
-	server.registerTool(
-		'get_bazi_chart',
-		{
-			title: '八字排盘',
-			description: '八字命盘：获取四柱详情、农历、节气、神煞、刑冲合害、五行力量统计、胎元、胎息、命宫、身宫、起运时间、大运列表。',
-			inputSchema: {
-				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-				gender: z.string().describe('性别：男/女 或 male/female'),
+function normalizeZiweiTopic(topic: string): ZiweiTopic {
+	if (isOneOf(topic, ziweiTopics)) return topic;
+	throw new Error('Unsupported topic. Use self, career, wealth, relationship, health, or family.');
+}
+
+function buildFourPillars(eightChar: EightChar, dayMaster: HeavenStem) {
+	return {
+		year: pillarDetail(eightChar.getYear(), dayMaster, false),
+		month: pillarDetail(eightChar.getMonth(), dayMaster, false),
+		day: pillarDetail(eightChar.getDay(), dayMaster, true),
+		hour: pillarDetail(eightChar.getHour(), dayMaster, false),
+	};
+}
+
+function pillarRecord(label: string, info: PillarInfo) {
+	return {
+		label,
+		pillar: info.pillar,
+		tenGod: info.tenGod,
+		heavenStem: info.heavenStem,
+		earthBranch: info.earthBranch,
+		hiddenStems: info.hiddenStems,
+		terrain: info.terrain,
+		selfSitting: info.selfSitting,
+		kongwang: info.kongwang,
+		nayin: info.nayin,
+	};
+}
+
+function pillarRecords(fourPillars: Record<PillarKey, PillarInfo>) {
+	return pillarKeys.map((key) => pillarRecord(pillarLabels[key], fourPillars[key]));
+}
+
+function buildMajorLuck(childLimit: ChildLimit, birthYear: number, dayMaster: HeavenStem) {
+	const majorLuck: Array<{
+		type: string;
+		sixtyCycle?: string;
+		tenGod?: string;
+		nayin?: string;
+		startAge: number;
+		endAge: number;
+		startYear: number;
+		endYear: number;
+		ageRange: string;
+	}> = [{
+		type: '童限',
+		startAge: childLimit.getStartAge(),
+		endAge: childLimit.getEndAge(),
+		startYear: birthYear + childLimit.getStartAge() - 1,
+		endYear: birthYear + childLimit.getEndAge(),
+		ageRange: `${childLimit.getStartAge()}-${childLimit.getEndAge()}岁`,
+	}];
+
+	let decade = childLimit.getStartDecadeFortune();
+	for (let i = 0; i < 10; i++) {
+		const sc = decade.getSixtyCycle();
+		majorLuck.push({
+			type: `第${i + 1}步大运`,
+			sixtyCycle: sc.getName(),
+			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
+			nayin: sc.getSound().getName(),
+			startAge: decade.getStartAge(),
+			endAge: decade.getEndAge(),
+			startYear: birthYear + decade.getStartAge() - 1,
+			endYear: birthYear + decade.getEndAge() - 1,
+			ageRange: `${decade.getStartAge()}-${decade.getEndAge()}岁`,
+		});
+		decade = decade.next(1);
+	}
+
+	return majorLuck;
+}
+
+function buildBaziChartData(datetime: string, gender: string) {
+	const ctx = buildBaziContext(datetime);
+	const { dt, solarTime, solarDay, lunarDay, eightChar, dayMaster } = ctx;
+	const g = toGender(gender);
+	const fourPillars = buildFourPillars(eightChar, dayMaster);
+	const solarTerms = findBracketingJie(dt.year, dt.month, dt.day, dt.hour, dt.minute);
+	const childLimit = ChildLimit.fromSolarTime(solarTime, g);
+	const endTime = childLimit.getEndTime();
+	const startLuck = {
+		description: `${childLimit.getYearCount()}年${childLimit.getMonthCount()}个月${childLimit.getDayCount()}天${childLimit.getHourCount()}时${childLimit.getMinuteCount()}分后起运`,
+		startDate: `公历${endTime.getYear()}年${endTime.getMonth()}月${endTime.getDay()}日 ${pad(endTime.getHour())}:${pad(endTime.getMinute())}:${pad(endTime.getSecond())}`,
+		isForward: childLimit.isForward(),
+		years: childLimit.getYearCount(),
+		months: childLimit.getMonthCount(),
+		days: childLimit.getDayCount(),
+		hours: childLimit.getHourCount(),
+		minutes: childLimit.getMinuteCount(),
+	};
+
+	return {
+		ctx,
+		input: { datetime, gender },
+		solar: solarDay.toString(),
+		lunar: `${lunarDay.toString()} ${eightChar.getHour().getName()}时`,
+		dayMaster: dayMaster.getName(),
+		fourPillars,
+		pillars: pillarRecords(fourPillars),
+		solarTerms,
+		specialCycles: {
+			fetalOrigin: sixtyCycleWithNayin(eightChar.getFetalOrigin()),
+			fetalBreath: sixtyCycleWithNayin(eightChar.getFetalBreath()),
+			lifePalace: sixtyCycleWithNayin(eightChar.getOwnSign()),
+			bodyPalace: sixtyCycleWithNayin(eightChar.getBodySign()),
+		},
+		startLuck,
+		majorLuck: buildMajorLuck(childLimit, dt.year, dayMaster),
+	};
+}
+
+function formatBaziChartMarkdown(data: ReturnType<typeof buildBaziChartData>) {
+	return joinSections([
+		'八字本命基础盘',
+		`输入: ${data.input.datetime}\n公历: ${data.solar}\n农历: ${data.lunar}\n日主: ${data.dayMaster}`,
+		formatPillarsTable(data.fourPillars),
+		mdTable(['节气', '时间'], [
+			[`当前${data.solarTerms.current.name}`, data.solarTerms.current.time],
+			[`下个${data.solarTerms.next.name}`, data.solarTerms.next.time],
+		]),
+		mdTable(['胎元', '胎息', '命宫', '身宫'], [[
+			cycleNayinText(data.specialCycles.fetalOrigin),
+			cycleNayinText(data.specialCycles.fetalBreath),
+			cycleNayinText(data.specialCycles.lifePalace),
+			cycleNayinText(data.specialCycles.bodyPalace),
+		]]),
+		`起运: ${data.startLuck.description}\n起运日期: ${data.startLuck.startDate}\n顺逆: ${data.startLuck.isForward ? '顺行' : '逆行'}`,
+		mdTable(
+			['运', '干支', '十神', '纳音', '年龄', '年份'],
+			data.majorLuck.map((luck) => [
+				luck.type,
+				luck.sixtyCycle,
+				luck.tenGod,
+				luck.nayin,
+				luck.ageRange,
+				`${luck.startYear}-${luck.endYear}`,
+			]),
+		),
+		'边界: 此工具只提供本命基础盘。判断旺衰取用请继续调用 bazi_structure；看阶段触发请调用 bazi_timeline 或 bazi_period_detail。',
+	]);
+}
+
+function calculateRelationRows(eightChar: EightChar) {
+	const pillars = getPillarCycles(eightChar);
+	const rows: Array<{ type: string; relation: string }> = [];
+	const branchMap = new Map<string, string[]>();
+
+	for (let i = 0; i < pillarKeys.length; i++) {
+		const leftKey = pillarKeys[i];
+		const left = pillars[leftKey];
+		const leftBranch = left.getEarthBranch();
+		const branchName = leftBranch.getName();
+		branchMap.set(branchName, [...(branchMap.get(branchName) ?? []), formatCycleLabel(pillarLabels[leftKey], left)]);
+
+		for (let j = i + 1; j < pillarKeys.length; j++) {
+			const rightKey = pillarKeys[j];
+			const right = pillars[rightKey];
+			const stemCombine = left.getHeavenStem().combine(right.getHeavenStem());
+			if (stemCombine) {
+				rows.push({
+					type: '天干五合',
+					relation: `${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${left.getHeavenStem().getName()}${right.getHeavenStem().getName()}合${stemCombine.getName()}`,
+				});
+			}
+
+			for (const relation of branchPairRelations(leftBranch, right.getEarthBranch())) {
+				rows.push({
+					type: '地支关系',
+					relation: `${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${relation}`,
+				});
+			}
+		}
+	}
+
+	for (const [branchName, labels] of branchMap.entries()) {
+		if (labels.length > 1 && ['辰', '午', '酉', '亥'].includes(branchName)) {
+			rows.push({ type: '地支自刑', relation: `${labels.join('、')}: ${branchName}${branchName}自刑` });
+		}
+	}
+
+	for (const combo of branchTripleCombos) {
+		if (combo.branches.every((branch) => branchMap.has(branch))) {
+			const locations = combo.branches.map((branch) => `${branch}:${(branchMap.get(branch) ?? []).join('/')}`).join('；');
+			rows.push({ type: combo.type, relation: `${combo.branches.join('')}成${combo.element}局（${locations}）` });
+		}
+	}
+
+	return rows;
+}
+
+function relationRowsMarkdown(rows: Array<{ type: string; relation: string }>) {
+	if (rows.length === 0) return '刑冲合害: 未见明显天干五合、六合、三合、三会、六冲、六害、相刑、破。';
+	return mdTable(['类型', '关系'], rows.map((row) => [row.type, row.relation]));
+}
+
+function collectTenGodDistribution(fourPillars: Record<PillarKey, PillarInfo>) {
+	const counts = new Map<string, number>();
+	const add = (tenGod: string, value = 1) => counts.set(tenGod, (counts.get(tenGod) ?? 0) + value);
+	for (const key of pillarKeys) {
+		add(fourPillars[key].tenGod);
+		for (const hidden of fourPillars[key].hiddenStems) add(hidden.tenGod, 0.5);
+	}
+	return [...counts.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.map(([tenGod, score]) => ({ tenGod, score: Number(score.toFixed(1)) }));
+}
+
+function collectRootEvidence(fourPillars: Record<PillarKey, PillarInfo>, dayMaster: HeavenStem) {
+	const dayElement = dayMaster.getElement().getName();
+	return pillarKeys.map((key) => {
+		const hiddenMatches = fourPillars[key].hiddenStems.filter((hidden) => {
+			const stem = HeavenStem.fromName(hidden.stem);
+			return stem.getElement().getName() === dayElement;
+		});
+		return {
+			pillar: pillarLabels[key],
+			branch: fourPillars[key].earthBranch,
+			matches: hiddenMatches,
+			hasSameElementRoot: hiddenMatches.length > 0,
+			hasExactRoot: hiddenMatches.some((hidden) => hidden.stem === dayMaster.getName()),
+		};
+	});
+}
+
+function seasonHint(branch: string) {
+	if (['寅', '卯', '辰'].includes(branch)) return '春令木气，需结合透干、通根、寒暖燥湿继续判断。';
+	if (['巳', '午', '未'].includes(branch)) return '夏令火气，需结合燥热、调候与泄耗继续判断。';
+	if (['申', '酉', '戌'].includes(branch)) return '秋令金气，需结合肃杀、通关与扶抑继续判断。';
+	return '冬令水气，需结合寒湿、调候与通根继续判断。';
+}
+
+function buildBaziStructureData(datetime: string, gender: string) {
+	const chart = buildBaziChartData(datetime, gender);
+	const { eightChar, dayMaster } = chart.ctx;
+	const scores = calculateElementScores(eightChar);
+	const totalScore = elementNames.reduce((sum, name) => sum + scores[name], 0);
+	const relations = calculateRelationRows(eightChar);
+	const monthBranch = eightChar.getMonth().getEarthBranch();
+	const checkpoints = [
+		{ item: '月令', evidence: `月支${monthBranch.getName()}，${seasonHint(monthBranch.getName())}` },
+		{ item: '通根', evidence: '查看四支藏干中是否有日主同五行或同干根气。' },
+		{ item: '透干', evidence: '查看年月时天干十神是否帮扶、耗泄、克制或生扶日主。' },
+		{ item: '组合', evidence: relations.length > 0 ? '原局存在合冲刑害触发点，需看位置与远近。' : '原局未见明显合冲刑害触发点。' },
+		{ item: '取用边界', evidence: '此工具只给证据，不直接判定身强身弱、格局、用神或忌神。' },
+	];
+
+	return {
+		chart,
+		monthCommand: {
+			branch: monthBranch.getName(),
+			element: monthBranch.getElement().getName(),
+			hint: seasonHint(monthBranch.getName()),
+		},
+		elementScores: elementNames.map((name) => ({
+			element: name,
+			score: Number(scores[name].toFixed(1)),
+			percent: Number(((scores[name] / totalScore) * 100).toFixed(1)),
+			isDayMasterElement: name === dayMaster.getElement().getName(),
+		})),
+		tenGodDistribution: collectTenGodDistribution(chart.fourPillars),
+		rootEvidence: collectRootEvidence(chart.fourPillars, dayMaster),
+		visibleStemEvidence: pillarKeys
+			.filter((key) => key !== 'day')
+			.map((key) => ({
+				pillar: pillarLabels[key],
+				stem: chart.fourPillars[key].heavenStem,
+				tenGod: chart.fourPillars[key].tenGod,
+			})),
+		relations,
+		checkpoints,
+	};
+}
+
+function formatBaziStructureMarkdown(data: ReturnType<typeof buildBaziStructureData>) {
+	return joinSections([
+		'八字命局结构证据',
+		`输入: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n月令: ${data.monthCommand.branch}(${data.monthCommand.element})\n说明: 此工具不输出最终断命结论，不直接判定身强身弱、格局或用神。`,
+		mdTable(['五行', '分数', '占比', '日主五行'], data.elementScores.map((item) => [
+			item.element,
+			item.score,
+			`${item.percent}%`,
+			item.isDayMasterElement ? '是' : '',
+		])),
+		mdTable(['十神', '权重'], data.tenGodDistribution.map((item) => [item.tenGod, item.score])),
+		mdTable(['柱', '地支', '同五行根气', '同干根气', '命中藏干'], data.rootEvidence.map((item) => [
+			item.pillar,
+			item.branch,
+			item.hasSameElementRoot ? '有' : '无',
+			item.hasExactRoot ? '有' : '无',
+			item.matches.map((match) => `${match.stem}(${match.tenGod})`).join('、') || '-',
+		])),
+		relationRowsMarkdown(data.relations),
+		mdTable(['检查项', '证据'], data.checkpoints.map((item) => [item.item, item.evidence])),
+		'下一步: 看阶段触发调用 bazi_timeline；看单一年/月/日/时调用 bazi_period_detail。',
+	]);
+}
+
+function relationAgainstOriginal(target: SixtyCycle, eightChar: EightChar) {
+	const pillars = getPillarCycles(eightChar);
+	return pillarKeys.map((key) => ({
+		pillar: pillarLabels[key],
+		original: pillars[key].getName(),
+		relation: pairRelationSummary(pillars[key], target),
+	}));
+}
+
+function buildBaziTimelineData(datetime: string, gender: string, startYear: number, count: number) {
+	const chart = buildBaziChartData(datetime, gender);
+	const { dt, solarTime, eightChar, dayMaster } = chart.ctx;
+	const childLimit = ChildLimit.fromSolarTime(solarTime, toGender(gender));
+	const birthYear = dt.year;
+	const startAge = startYear - birthYear + 1;
+	const rows: Array<Record<string, unknown>> = [];
+	let fortune = childLimit.getStartFortune();
+	const firstAge = fortune.getAge();
+	if (startAge > firstAge) fortune = fortune.next(startAge - firstAge);
+
+	for (let i = 0; i < count; i++) {
+		const age = fortune.getAge();
+		const year = birthYear + age - 1;
+		const xiaoYunSc = fortune.getSixtyCycle();
+		const yearSc = fortune.getSixtyCycleYear().getSixtyCycle();
+		let decadeInfo: Record<string, unknown> | null = null;
+		let dec = childLimit.getStartDecadeFortune();
+		for (let d = 0; d < 10; d++) {
+			if (age >= dec.getStartAge() && age <= dec.getEndAge()) {
+				const decSc = dec.getSixtyCycle();
+				decadeInfo = {
+					sixtyCycle: decSc.getName(),
+					tenGod: dayMaster.getTenStar(decSc.getHeavenStem()).getName(),
+					startAge: dec.getStartAge(),
+					endAge: dec.getEndAge(),
+				};
+				break;
+			}
+			dec = dec.next(1);
+		}
+
+		rows.push({
+			year,
+			age,
+			decade: decadeInfo,
+			xiaoYun: {
+				sixtyCycle: xiaoYunSc.getName(),
+				tenGod: dayMaster.getTenStar(xiaoYunSc.getHeavenStem()).getName(),
 			},
+			liuNian: {
+				sixtyCycle: yearSc.getName(),
+				tenGod: dayMaster.getTenStar(yearSc.getHeavenStem()).getName(),
+			},
+			originalRelations: relationAgainstOriginal(yearSc, eightChar),
+			specialRelations: formatSpecialCycleRelations(yearSc, eightChar),
+		});
+		fortune = fortune.next(1);
+	}
+
+	return { chart, startYear, count, rows };
+}
+
+function formatBaziTimelineMarkdown(data: ReturnType<typeof buildBaziTimelineData>) {
+	return joinSections([
+		'八字大运流年时间轴',
+		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n查询: ${data.startYear} 起 ${data.count} 年`,
+		mdTable(
+			['年份', '年龄', '大运', '小运', '流年'],
+			data.rows.map((row) => {
+				const decade = row.decade as Record<string, unknown> | null;
+				const xiaoYun = row.xiaoYun as Record<string, unknown>;
+				const liuNian = row.liuNian as Record<string, unknown>;
+				return [
+					row.year,
+					`${row.age}岁`,
+					decade ? `${decade.sixtyCycle}(${decade.tenGod})` : '-',
+					`${xiaoYun.sixtyCycle}(${xiaoYun.tenGod})`,
+					`${liuNian.sixtyCycle}(${liuNian.tenGod})`,
+				];
+			}),
+		),
+		mdTable(
+			['年份', '流年', '胎元/命宫/身宫关系'],
+			data.rows.map((row) => {
+				const liuNian = row.liuNian as Record<string, unknown>;
+				return [row.year, liuNian.sixtyCycle, row.specialRelations];
+			}),
+		),
+		'边界: 此工具只给阶段时间轴和触发关系。若要展开某个年/月/日/时，请继续调用 bazi_period_detail。',
+	]);
+}
+
+function buildBaziPeriodData(
+	datetime: string,
+	gender: string,
+	scopeInput: string,
+	year?: number,
+	month?: number,
+	date?: string,
+	hour?: number,
+) {
+	const chart = buildBaziChartData(datetime, gender);
+	const { eightChar, dayMaster } = chart.ctx;
+	const scope = normalizeBaziPeriodScope(scopeInput);
+	let target: Record<string, unknown>;
+
+	if (scope === 'year') {
+		if (!year) throw new Error('scope=year requires year.');
+		const sc = SixtyCycleYear.fromYear(year).getSixtyCycle();
+		target = {
+			scope,
+			label: `${year}年`,
+			sixtyCycle: sc.getName(),
+			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
+			nayin: sc.getSound().getName(),
+			originalRelations: relationAgainstOriginal(sc, eightChar),
+			timeline: buildBaziTimelineData(datetime, gender, year, 1).rows[0],
+		};
+	} else if (scope === 'month') {
+		if (!year || !month) throw new Error('scope=month requires year and month.');
+		if (month < 1 || month > 12) throw new Error('month must be 1-12.');
+		const scMonth = SixtyCycleYear.fromYear(year).getMonths()[month - 1];
+		const sc = scMonth.getSixtyCycle();
+		target = {
+			scope,
+			label: `${year}年第${month}个干支月`,
+			sixtyCycle: sc.getName(),
+			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
+			nayin: sc.getSound().getName(),
+			originalRelations: relationAgainstOriginal(sc, eightChar),
+			specialRelations: formatSpecialCycleRelations(sc, eightChar),
+		};
+	} else if (scope === 'day') {
+		const targetDate = parseDate(date ?? '');
+		if (!targetDate) throw new Error('scope=day requires date in YYYY-MM-DD.');
+		const scDay = SixtyCycleDay.fromSolarDay(SolarDay.fromYmd(targetDate.year, targetDate.month, targetDate.day));
+		const sc = scDay.getSixtyCycle();
+		target = {
+			scope,
+			label: date,
+			sixtyCycle: sc.getName(),
+			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
+			nayin: sc.getSound().getName(),
+			twelveStar: scDay.getTwelveStar().getName(),
+			nineStar: scDay.getNineStar().toString(),
+			recommends: scDay.getRecommends().map((item) => item.getName()),
+			avoids: scDay.getAvoids().map((item) => item.getName()),
+			originalRelations: relationAgainstOriginal(sc, eightChar),
+			specialRelations: formatSpecialCycleRelations(sc, eightChar),
+		};
+	} else {
+		const targetDate = parseDate(date ?? '');
+		if (!targetDate) throw new Error('scope=hour requires date in YYYY-MM-DD.');
+		if (hour === undefined || hour < 0 || hour > 23) throw new Error('scope=hour requires hour 0-23.');
+		const scHour = SolarTime.fromYmdHms(targetDate.year, targetDate.month, targetDate.day, hour, 0, 0).getSixtyCycleHour();
+		const sc = scHour.getSixtyCycle();
+		target = {
+			scope,
+			label: `${date} ${pad(hour)}:00`,
+			sixtyCycle: sc.getName(),
+			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
+			nayin: sc.getSound().getName(),
+			twelveStar: scHour.getTwelveStar().getName(),
+			nineStar: scHour.getNineStar().toString(),
+			recommends: scHour.getRecommends().map((item) => item.getName()),
+			avoids: scHour.getAvoids().map((item) => item.getName()),
+			originalRelations: relationAgainstOriginal(sc, eightChar),
+			specialRelations: formatSpecialCycleRelations(sc, eightChar),
+		};
+	}
+
+	return { chart, target };
+}
+
+function formatBaziPeriodMarkdown(data: ReturnType<typeof buildBaziPeriodData>) {
+	const relations = data.target.originalRelations as Array<Record<string, unknown>>;
+	return joinSections([
+		'八字单一周期详盘',
+		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n周期: ${data.target.label}\n干支: ${data.target.sixtyCycle}(${data.target.tenGod})\n纳音: ${data.target.nayin}`,
+		mdTable(['原局柱', '原局干支', '与周期关系'], relations.map((row) => [row.pillar, row.original, row.relation])),
+		data.target.specialRelations ? `胎元/命宫/身宫关系: ${data.target.specialRelations}` : undefined,
+		Array.isArray(data.target.recommends) ? mdTable(['宜', '忌'], [[(data.target.recommends as string[]).join('、'), (data.target.avoids as string[]).join('、')]]) : undefined,
+		'边界: 此工具只展开指定周期证据，不替代 bazi_structure 的命局结构判断。',
+	]);
+}
+
+function starRecord(star: IFunctionalStar) {
+	return {
+		name: star.name,
+		type: star.type,
+		scope: star.scope,
+		brightness: star.brightness ?? '',
+		mutagen: star.mutagen ?? '',
+	};
+}
+
+function palaceRecord(palace: IFunctionalPalace) {
+	return {
+		index: palace.index,
+		name: palace.name,
+		heavenlyStem: palace.heavenlyStem,
+		earthlyBranch: palace.earthlyBranch,
+		isBodyPalace: palace.isBodyPalace,
+		isOriginalPalace: palace.isOriginalPalace,
+		isEmpty: palace.isEmpty(),
+		flags: palaceFlags(palace),
+		majorStars: palace.majorStars.map(starRecord),
+		minorStars: palace.minorStars.map(starRecord),
+		adjectiveStars: palace.adjectiveStars.map(starRecord),
+		changsheng12: palace.changsheng12,
+		boshi12: palace.boshi12,
+		jiangqian12: palace.jiangqian12,
+		suiqian12: palace.suiqian12,
+		decadal: palace.decadal,
+		ages: palace.ages,
+	};
+}
+
+function ziweiPalaceRef(palace: IFunctionalPalace) {
+	return {
+		index: palace.index,
+		name: palace.name,
+		heavenlyStem: palace.heavenlyStem,
+		earthlyBranch: palace.earthlyBranch,
+		stemBranch: `${palace.heavenlyStem}${palace.earthlyBranch}`,
+	};
+}
+
+function compactZiweiStarRecord(star: IFunctionalStar) {
+	return {
+		name: star.name,
+		brightness: star.brightness ?? '',
+		mutagen: star.mutagen ?? '',
+	};
+}
+
+function compactZiweiPalaceEvidence(palace: IFunctionalPalace) {
+	return {
+		...ziweiPalaceRef(palace),
+		isBodyPalace: palace.isBodyPalace,
+		isEmpty: palace.isEmpty(),
+		flags: palaceFlags(palace),
+		majorStars: palace.majorStars.map(compactZiweiStarRecord),
+		minorStars: palace.minorStars.map(compactZiweiStarRecord),
+		mutagenStars: [...palace.majorStars, ...palace.minorStars, ...palace.adjectiveStars]
+			.filter((star) => Boolean(star.mutagen))
+			.map(compactZiweiStarRecord),
+	};
+}
+
+function compactZiweiSurroundedEvidence(surrounded: ReturnType<IFunctionalAstrolabe['surroundedPalaces']>) {
+	return [
+		{ relation: '本宫', palace: ziweiPalaceRef(surrounded.target), majorStars: surrounded.target.majorStars.map(compactZiweiStarRecord) },
+		{ relation: '对宫', palace: ziweiPalaceRef(surrounded.opposite), majorStars: surrounded.opposite.majorStars.map(compactZiweiStarRecord) },
+		{ relation: '财帛位', palace: ziweiPalaceRef(surrounded.wealth), majorStars: surrounded.wealth.majorStars.map(compactZiweiStarRecord) },
+		{ relation: '官禄位', palace: ziweiPalaceRef(surrounded.career), majorStars: surrounded.career.majorStars.map(compactZiweiStarRecord) },
+	];
+}
+
+function compactZiweiFlyEvidence(palace: IFunctionalPalace) {
+	const places = palace.mutagedPlaces();
+	return mutagenNames.map((mutagen, index) => ({
+		mutagen,
+		toPalace: places[index] ? ziweiPalaceRef(places[index] as IFunctionalPalace) : null,
+		isSelfMutaged: palace.selfMutaged(mutagen as never),
+	}));
+}
+
+function ziweiSummaryRecord(chart: ReturnType<typeof buildZiweiChart>, datetime: string) {
+	const astrolabe = chart.astrolabe;
+	return {
+		inputDatetime: datetime,
+		calendar: chart.calendar,
+		profile: chart.profile,
+		timeIndex: chart.option.timeIndex,
+		solarDate: astrolabe.solarDate,
+		lunarDate: astrolabe.lunarDate,
+		chineseDate: astrolabe.chineseDate,
+		soul: astrolabe.soul,
+		body: astrolabe.body,
+		fiveElementsClass: astrolabe.fiveElementsClass,
+		zodiac: astrolabe.zodiac,
+		sign: astrolabe.sign,
+		soulPalaceBranch: astrolabe.earthlyBranchOfSoulPalace,
+		bodyPalaceBranch: astrolabe.earthlyBranchOfBodyPalace,
+	};
+}
+
+function ziweiSurroundedRecord(surrounded: ReturnType<IFunctionalAstrolabe['surroundedPalaces']>) {
+	return [
+		{ relation: '本宫', palace: palaceRecord(surrounded.target) },
+		{ relation: '对宫', palace: palaceRecord(surrounded.opposite) },
+		{ relation: '财帛位', palace: palaceRecord(surrounded.wealth) },
+		{ relation: '官禄位', palace: palaceRecord(surrounded.career) },
+	];
+}
+
+function ziweiFlyRecord(palace: IFunctionalPalace) {
+	const places = palace.mutagedPlaces();
+	return mutagenNames.map((mutagen, index) => ({
+		mutagen,
+		toPalace: places[index] ? palaceRecord(places[index] as IFunctionalPalace) : null,
+		isSelfMutaged: palace.selfMutaged(mutagen as never),
+	}));
+}
+
+function buildZiweiChartData(
+	datetime: string,
+	gender: string,
+	profile?: string,
+	calendar?: string,
+	isLeapMonth?: boolean,
+	language?: string,
+) {
+	const chart = buildZiweiChart(datetime, gender, profile, calendar, isLeapMonth, language);
+	return {
+		chart,
+		summary: ziweiSummaryRecord(chart, datetime),
+		palaces: chart.astrolabe.palaces.map(palaceRecord),
+		transforms: ziweiFourTransforms(chart.astrolabe),
+	};
+}
+
+function formatZiweiChartMarkdown(data: ReturnType<typeof buildZiweiChartData>) {
+	return joinSections([
+		'紫微斗数本命全盘',
+		formatZiweiSummary(data.chart.astrolabe, data.summary.inputDatetime, data.chart.calendar, data.chart.profile, data.chart.option.timeIndex),
+		joinSections(['十二宫星曜', formatZiweiPalacesTable(data.chart.astrolabe)]),
+		joinSections(['生年四化', formatZiweiTransformsTable(data.chart.astrolabe)]),
+		'边界: 本工具只给本命全盘。看单宫三方四正、夹宫、空宫借星与飞化自化，请调用 ziwei_palace_detail；看运限请调用 ziwei_horoscope_overview。',
+	]);
+}
+
+function buildZiweiPalaceDetailData(
+	datetime: string,
+	gender: string,
+	palaceName: string,
+	profile?: string,
+	calendar?: string,
+	isLeapMonth?: boolean,
+	language?: string,
+) {
+	const data = buildZiweiChartData(datetime, gender, profile, calendar, isLeapMonth, language);
+	const palace = data.chart.astrolabe.palace(palaceName as never);
+	if (!palace) throw new Error(`Unknown palace: ${palaceName}`);
+	const surrounded = data.chart.astrolabe.surroundedPalaces(palaceName as never);
+	const left = data.chart.astrolabe.palaces[(palace.index + 11) % 12];
+	const right = data.chart.astrolabe.palaces[(palace.index + 1) % 12];
+	return {
+		...data,
+		palace: palaceRecord(palace),
+		surrounded: ziweiSurroundedRecord(surrounded),
+		adjacent: [
+			{ relation: '前一宫', palace: palaceRecord(left) },
+			{ relation: '后一宫', palace: palaceRecord(right) },
+		],
+		borrowedFromOpposite: palace.isEmpty() ? palaceRecord(surrounded.opposite) : null,
+		flyingTransforms: ziweiFlyRecord(palace),
+	};
+}
+
+function formatZiweiPalaceDetailMarkdown(data: ReturnType<typeof buildZiweiPalaceDetailData>) {
+	const palace = data.palace;
+	return joinSections([
+		'紫微斗数单宫详盘',
+		`宫位: ${palace.name}(${palace.heavenlyStem}${palace.earthlyBranch})\n标记: ${palace.flags}\n空宫: ${palace.isEmpty ? '是' : '否'}`,
+		mdTable(['关系', '宫位', '干支', '主星', '辅星'], data.surrounded.map((item) => [
+			item.relation,
+			item.palace.name,
+			`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
+			(item.palace.majorStars as ReturnType<typeof starRecord>[]).map((star) => `${star.name}${star.brightness ? `(${star.brightness})` : ''}`).join('、') || '-',
+			(item.palace.minorStars as ReturnType<typeof starRecord>[]).map((star) => `${star.name}${star.brightness ? `(${star.brightness})` : ''}`).join('、') || '-',
+		])),
+		mdTable(['夹宫', '宫位', '干支', '主星'], data.adjacent.map((item) => [
+			item.relation,
+			item.palace.name,
+			`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
+			(item.palace.majorStars as ReturnType<typeof starRecord>[]).map((star) => star.name).join('、') || '-',
+		])),
+		data.borrowedFromOpposite ? `空宫借星参考: 对宫 ${data.borrowedFromOpposite.name} 主星 ${(data.borrowedFromOpposite.majorStars as ReturnType<typeof starRecord>[]).map((star) => star.name).join('、') || '-'}` : undefined,
+		mdTable(['宫干四化', '飞入宫位', '自化'], data.flyingTransforms.map((item) => [
+			item.mutagen,
+			item.toPalace ? `${item.toPalace.name}(${item.toPalace.heavenlyStem}${item.toPalace.earthlyBranch})` : '-',
+			item.isSelfMutaged ? '是' : '否',
+		])),
+		'边界: 此工具只给单宫证据，不直接给最终吉凶断语。需要运限叠盘时调用 ziwei_scope_detail 或 ziwei_topic_context。',
+	]);
+}
+
+function buildZiweiHoroscopeOverviewData(
+	birthDatetime: string,
+	gender: string,
+	targetDatetime: string,
+	profile?: string,
+	calendar?: string,
+	isLeapMonth?: boolean,
+	language?: string,
+) {
+	const ctx = buildZiweiHoroscope(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
+	return {
+		ctx,
+		birthDatetime,
+		targetDatetime,
+		overview: ziweiScopes.map((scope) => {
+			const item = scopeItem(ctx.horoscope, scope);
+			return {
+				scope,
+				label: scope === 'age' ? `${ziweiScopeLabels[scope]}(${ctx.horoscope.age.nominalAge}虚岁)` : ziweiScopeLabels[scope],
+				branch: horoscopeItemBranch(item),
+				originPalace: palaceLabel(ctx.astrolabe, item.index),
+				mutagens: item.mutagen,
+				starPalaceCount: item.stars ? item.stars.filter((stars) => stars.length > 0).length : 0,
+			};
+		}),
+	};
+}
+
+function formatZiweiHoroscopeOverviewMarkdown(data: ReturnType<typeof buildZiweiHoroscopeOverviewData>) {
+	return joinSections([
+		'紫微运限总览',
+		`出生: ${data.birthDatetime} (${data.ctx.calendar === 'solar' ? '公历' : '农历'})\n目标: ${data.targetDatetime}\n目标公历: ${data.ctx.horoscope.solarDate}\n目标农历: ${data.ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[data.ctx.profile]} (${data.ctx.profile})\n目标时辰索引: ${data.ctx.targetTimeIndex}`,
+		mdTable(['层级', '干支', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
+			item.label,
+			item.branch,
+			item.originPalace,
+			item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
+			item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',
+		])),
+		'边界: 这个工具只做导航总览，不展开十二宫。下一步必须调用 ziwei_scope_detail 展开单层运限，或调用 ziwei_topic_context 做专题取证。',
+	]);
+}
+
+function buildZiweiScopeDetailData(
+	birthDatetime: string,
+	gender: string,
+	targetDatetime: string,
+	scopeInput: string,
+	focusPalace: string,
+	profile?: string,
+	calendar?: string,
+	isLeapMonth?: boolean,
+	language?: string,
+) {
+	const ctx = buildZiweiHoroscope(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
+	const scope = normalizeZiweiScope(scopeInput);
+	const item = scopeItem(ctx.horoscope, scope);
+	const palaces = ctx.astrolabe.palaces.map((palace, index) => ({
+		index: index + 1,
+		runtimePalace: item.palaceNames[index] ?? '-',
+		originPalace: palaceRecord(palace),
+		horoscopeStars: item.stars?.[index]?.map(starRecord) ?? [],
+	}));
+	let focus: { agePalace: ReturnType<typeof palaceRecord> | null } | { surrounded: ReturnType<typeof ziweiSurroundedRecord> };
+	if (scope === 'age') {
+		const agePalace = ctx.horoscope.agePalace();
+		focus = { agePalace: agePalace ? palaceRecord(agePalace) : null };
+	} else {
+		const focusSurrounded = ctx.horoscope.surroundPalaces(focusPalace as never, scope as ZiweiRuntimeScope);
+		if (!focusSurrounded) throw new Error(`Unknown focusPalace: ${focusPalace}`);
+		focus = { surrounded: ziweiSurroundedRecord(focusSurrounded) };
+	}
+	return {
+		ctx,
+		birthDatetime,
+		targetDatetime,
+		scope,
+		focusPalace,
+		item: {
+			branch: horoscopeItemBranch(item),
+			originPalace: palaceLabel(ctx.astrolabe, item.index),
+			mutagens: item.mutagen,
+			nominalAge: scope === 'age' ? ctx.horoscope.age.nominalAge : null,
+		},
+		palaces,
+		focus,
+	};
+}
+
+function formatZiweiScopeDetailMarkdown(data: ReturnType<typeof buildZiweiScopeDetailData>) {
+	return joinSections([
+		`${ziweiScopeLabels[data.scope]}详盘`,
+		`出生: ${data.birthDatetime}\n目标: ${data.targetDatetime}\n目标公历: ${data.ctx.horoscope.solarDate}\n目标农历: ${data.ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[data.ctx.profile]} (${data.ctx.profile})`,
+		mdTable(['层级', '干支', '所在原盘宫', '四化', '虚岁'], [[
+			ziweiScopeLabels[data.scope],
+			data.item.branch,
+			data.item.originPalace,
+			data.item.mutagens.length > 0 ? data.item.mutagens.join('、') : '-',
+			data.item.nominalAge ? `${data.item.nominalAge}虚岁` : '-',
+		]]),
+		mdTable(['序', '运限宫位', '原盘宫位', '原盘干支', '原盘主星', '原盘辅星', '流耀'], data.palaces.map((item) => [
+			item.index,
+			item.runtimePalace,
+			item.originPalace.name,
+			`${item.originPalace.heavenlyStem}${item.originPalace.earthlyBranch}`,
+			(item.originPalace.majorStars as ReturnType<typeof starRecord>[]).map((star) => star.name).join('、') || '-',
+			(item.originPalace.minorStars as ReturnType<typeof starRecord>[]).map((star) => star.name).join('、') || '-',
+			item.horoscopeStars.map((star) => star.name).join('、') || '-',
+		])),
+		data.scope === 'age'
+			? `小限宫位: ${(data.focus as { agePalace: ReturnType<typeof palaceRecord> | null }).agePalace?.name ?? '-'}`
+			: mdTable(['关系', '原盘宫位', '干支', '主星', '辅星'], ((data.focus as { surrounded: ReturnType<typeof ziweiSurroundedRecord> }).surrounded).map((item) => [
+				item.relation,
+				item.palace.name,
+				`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
+				(item.palace.majorStars as ReturnType<typeof starRecord>[]).map((star) => star.name).join('、') || '-',
+				(item.palace.minorStars as ReturnType<typeof starRecord>[]).map((star) => star.name).join('、') || '-',
+			])),
+		'边界: 此工具只展开一个运限层级。专题整合请调用 ziwei_topic_context。',
+	]);
+}
+
+const ziweiTopicPalaces: Record<ZiweiTopic, string[]> = {
+	self: ['命宫', '迁移', '福德'],
+	career: ['官禄', '迁移', '财帛', '福德'],
+	wealth: ['财帛', '田宅', '官禄', '兄弟'],
+	relationship: ['夫妻', '子女', '福德', '命宫'],
+	health: ['疾厄', '福德', '命宫', '父母'],
+	family: ['田宅', '父母', '兄弟', '子女', '夫妻'],
+};
+
+function buildZiweiTopicContextData(
+	birthDatetime: string,
+	gender: string,
+	targetDatetime: string,
+	topicInput: string,
+	profile?: string,
+	calendar?: string,
+	isLeapMonth?: boolean,
+	language?: string,
+) {
+	const topic = normalizeZiweiTopic(topicInput);
+	const overview = buildZiweiHoroscopeOverviewData(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
+	const yearlyItem = scopeItem(overview.ctx.horoscope, 'yearly');
+	const palaces = ziweiTopicPalaces[topic].map((name) => {
+		const origin = overview.ctx.astrolabe.palace(name as never);
+		if (!origin) throw new Error(`Unknown topic palace: ${name}`);
+		const yearlyPalace = overview.ctx.horoscope.palace(name as never, 'yearly');
+		const yearlyMutagenHits = mutagenNames.filter((mutagen) => overview.ctx.horoscope.hasHoroscopeMutagen(name as never, 'yearly', mutagen as never));
+		return {
+			name,
+			natal: compactZiweiPalaceEvidence(origin),
+			natalSurrounded: compactZiweiSurroundedEvidence(overview.ctx.astrolabe.surroundedPalaces(name as never)),
+			natalFlyingTransforms: compactZiweiFlyEvidence(origin),
+			yearly: yearlyPalace ? compactZiweiPalaceEvidence(yearlyPalace as IFunctionalPalace) : null,
+			yearlyStars: yearlyItem.stars?.[origin.index]?.map(compactZiweiStarRecord) ?? [],
+			yearlyMutagenHits,
+			nextCalls: [
+				{ tool: 'ziwei_palace_detail', arguments: { palace: name } },
+				{ tool: 'ziwei_scope_detail', arguments: { scope: 'yearly', focusPalace: name } },
+			],
+		};
+	});
+
+	return {
+		birthDatetime,
+		targetDatetime,
+		topic,
+		topicPalaces: ziweiTopicPalaces[topic],
+		runtime: {
+			profile: overview.ctx.profile,
+			calendar: overview.ctx.calendar,
+			targetSolarDate: overview.ctx.horoscope.solarDate,
+			targetLunarDate: overview.ctx.horoscope.lunarDate,
+			targetTimeIndex: overview.ctx.targetTimeIndex,
+		},
+		overview: overview.overview,
+		palaces,
+		warnings: ['专题取证只返回索引级证据，不输出最终断语；单宫细节调用 ziwei_palace_detail，运限叠盘调用 ziwei_scope_detail。'],
+	};
+}
+
+function formatZiweiTopicContextMarkdown(data: ReturnType<typeof buildZiweiTopicContextData>) {
+	return joinSections([
+		'紫微专题取证',
+		`专题: ${data.topic}\n出生: ${data.birthDatetime}\n目标: ${data.targetDatetime}\n相关宫位: ${data.topicPalaces.join('、')}`,
+		mdTable(['宫位', '本命干支', '本命主星', '本命辅星', '流年宫位', '流年四化命中'], data.palaces.map((item) => [
+			item.name,
+			item.natal.stemBranch,
+			item.natal.majorStars.map((star) => `${star.name}${star.brightness ? `(${star.brightness})` : ''}`).join('、') || '-',
+			item.natal.minorStars.map((star) => star.name).join('、') || '-',
+			item.yearly ? `${item.yearly.name}(${item.yearly.stemBranch})` : '-',
+			item.yearlyMutagenHits.join('、') || '-',
+		])),
+		'边界: 此工具只返回专题相关证据，不输出最终断语。需要某宫细节请调用 ziwei_palace_detail；需要某层运限详盘请调用 ziwei_scope_detail。',
+	]);
+}
+
+function registerBaziTools(server: McpServer) {
+	server.registerTool(
+		'bazi_chart',
+		{
+			title: '八字本命基础盘',
+			description: '适用场景: 第一步获取八字客观基础盘。不要用于直接判断身强身弱、格局或用神。下一步: 调用 bazi_structure 做命局结构取证，或 bazi_timeline 看阶段触发。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM，按出生地当地民用时间输入'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+			},
+			outputSchema: standardOutputSchema,
 		},
 		async ({ datetime, gender }) => {
 			try {
-				const ctx = buildBaziContext(datetime);
-				const { dt, solarTime, solarDay, lunarDay, eightChar, dayMaster } = ctx;
-				const g = toGender(gender);
-
-				// 四柱详情
-				const fourPillars = {
-					year: pillarDetail(eightChar.getYear(), dayMaster, false),
-					month: pillarDetail(eightChar.getMonth(), dayMaster, false),
-					day: pillarDetail(eightChar.getDay(), dayMaster, true),
-					hour: pillarDetail(eightChar.getHour(), dayMaster, false),
-				};
-
-				// 农历
-				const lunar = `${lunarDay.toString()} ${eightChar.getHour().getName()}时`;
-
-				// 节气
-				const solarTerms = findBracketingJie(dt.year, dt.month, dt.day, dt.hour, dt.minute);
-
-				// 胎元、胎息
-				const fetalOrigin = sixtyCycleWithNayin(eightChar.getFetalOrigin());
-				const fetalBreath = sixtyCycleWithNayin(eightChar.getFetalBreath());
-
-				// 命宫、身宫
-				const lifePalace = sixtyCycleWithNayin(eightChar.getOwnSign());
-				const bodyPalace = sixtyCycleWithNayin(eightChar.getBodySign());
-
-				// 起运
-				const childLimit = ChildLimit.fromSolarTime(solarTime, g);
-				const endTime = childLimit.getEndTime();
-				const startLuck = {
-					description: `${childLimit.getYearCount()}年${childLimit.getMonthCount()}个月${childLimit.getDayCount()}天${childLimit.getHourCount()}时${childLimit.getMinuteCount()}分后起运`,
-					startDate: `公历${endTime.getYear()}年${endTime.getMonth()}月${endTime.getDay()}日 ${pad(endTime.getHour())}:${pad(endTime.getMinute())}:${pad(endTime.getSecond())}`,
-					years: childLimit.getYearCount(),
-					months: childLimit.getMonthCount(),
-					days: childLimit.getDayCount(),
-					hours: childLimit.getHourCount(),
-					minutes: childLimit.getMinuteCount(),
-				};
-
-				// 大运
-				const birthYear = dt.year;
-				const majorLuck: Array<{
-					type?: string;
-					sixtyCycle?: string;
-					tenGod?: string;
-					nayin?: string;
-					startAge?: number;
-					endAge?: number;
-					startYear: number;
-					endYear: number;
-					ageRange: string;
-				}> = [];
-
-				// 童限
-				majorLuck.push({
-					type: '童限',
-					startYear: birthYear + childLimit.getStartAge() - 1,
-					endYear: birthYear + childLimit.getEndAge(),
-					ageRange: `${childLimit.getStartAge()} - ${childLimit.getEndAge()}岁`,
+				const data = buildBaziChartData(datetime, gender);
+				return structuredResult({
+					ok: true,
+					kind: 'bazi_chart',
+					summary: '八字本命基础盘，含四柱、藏干十神、纳音、空亡、胎元、命宫、身宫、节气、起运和大运列表。',
+					data: {
+						input: data.input,
+						solar: data.solar,
+						lunar: data.lunar,
+						dayMaster: data.dayMaster,
+						pillars: data.pillars,
+						solarTerms: data.solarTerms,
+						specialCycles: data.specialCycles,
+						startLuck: data.startLuck,
+						majorLuck: data.majorLuck,
+					},
 				});
-
-				// 十步大运
-				let decade = childLimit.getStartDecadeFortune();
-				for (let i = 0; i < 10; i++) {
-					const sc = decade.getSixtyCycle();
-					majorLuck.push({
-						sixtyCycle: sc.getName(),
-						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-						nayin: sc.getSound().getName(),
-						startAge: decade.getStartAge(),
-						endAge: decade.getEndAge(),
-						startYear: birthYear + decade.getStartAge() - 1,
-						endYear: birthYear + decade.getEndAge() - 1,
-						ageRange: `${decade.getStartAge()} - ${decade.getEndAge()}岁`,
-					});
-					decade = decade.next(1);
-				}
-
-				return textResult(joinSections([
-					`输入: ${datetime}\n公历: ${solarDay.toString()}\n农历: ${lunar}`,
-					formatPillarsTable(fourPillars),
-					joinSections(['命中神煞', formatShenshaTable(eightChar, true)]),
-					joinSections(['刑冲合害关系', formatRelationsTable(eightChar)]),
-					joinSections(['五行力量统计', formatElementScoresTable(eightChar)]),
-					mdTable(['节气', '时间'], [
-						[`当前${solarTerms.current.name}`, solarTerms.current.time],
-						[`下个${solarTerms.next.name}`, solarTerms.next.time],
-					]),
-					mdTable(['胎元', '胎息', '命宫', '身宫'], [[
-						cycleNayinText(fetalOrigin),
-						cycleNayinText(fetalBreath),
-						cycleNayinText(lifePalace),
-						cycleNayinText(bodyPalace),
-					]]),
-					`起运: ${startLuck.description}\n起运日期: ${startLuck.startDate}`,
-					mdTable(
-						['运', '干支', '十神', '纳音', '年龄', '年份'],
-						majorLuck.map((luck, index) => [
-							luck.type ?? `第${index}步`,
-							luck.sixtyCycle,
-							luck.tenGod,
-							luck.nayin,
-							luck.ageRange,
-							`${luck.startYear}-${luck.endYear}`,
-						]),
-					),
-				]));
 			} catch (e) {
-				return errResult(`八字命盘错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`bazi_chart 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
-}
 
-function registerBaziShenshaTool(server: McpServer) {
 	server.registerTool(
-		'get_bazi_shensha',
+		'bazi_structure',
 		{
-			title: '八字神煞',
-			description: '按年干/日干、年支/日支、月支起常用八字神煞，输出天乙贵人、文昌、羊刃、禄神、桃花、驿马、华盖、劫煞、将星、天德、月德等命中位置。',
+			title: '八字命局结构证据',
+			description: '适用场景: 在 bazi_chart 后分析日主、月令、通根、透干、五行、十神、刑冲合害与旺衰取用证据。不要输出最终断命结论。下一步: 调用 bazi_timeline 或 bazi_period_detail 验证阶段。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
 			},
+			outputSchema: standardOutputSchema,
 		},
-		async ({ datetime }) => {
+		async ({ datetime, gender }) => {
 			try {
-				const { solarDay, lunarDay, eightChar } = buildBaziContext(datetime);
-				return textResult(joinSections([
-					`输入: ${datetime}\n公历: ${solarDay.toString()}\n农历: ${lunarDay.toString()}\n四柱: ${eightChar.toString()}`,
-					formatShenshaTable(eightChar),
-				]));
+				const data = buildBaziStructureData(datetime, gender);
+				return structuredResult({
+					ok: true,
+					kind: 'bazi_structure',
+					summary: '八字结构取证数据，不直接给身强身弱、格局、用神或忌神结论。',
+					data: {
+						input: data.chart.input,
+						dayMaster: data.chart.dayMaster,
+						monthCommand: data.monthCommand,
+						elementScores: data.elementScores,
+						tenGodDistribution: data.tenGodDistribution,
+						rootEvidence: data.rootEvidence,
+						visibleStemEvidence: data.visibleStemEvidence,
+						relations: data.relations,
+						checkpoints: data.checkpoints,
+					},
+				});
 			} catch (e) {
-				return errResult(`八字神煞错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`bazi_structure 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
-}
 
-function registerBaziFortuneTool(server: McpServer) {
 	server.registerTool(
-		'get_bazi_fortune',
+		'bazi_timeline',
 		{
-			title: '推算大运流年',
-			description: '八字小运与流年：输入出生信息和年份范围，获取每年的大运、小运、流年、十神，以及流年与胎元/命宫/身宫的刑冲合害关系。',
+			title: '八字大运流年时间轴',
+			description: '适用场景: 在本命结构后查看大运、流年、小运、年龄、年份和原局触发。不要用于单独断某一年细节。下一步: 对重点年份调用 bazi_period_detail。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-				gender: z.string().describe('性别：男/女 或 male/female'),
-				startYear: z.number().describe('起始年份（公历年份）'),
-				count: z.number().optional().default(10).describe('查询年数，默认10'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+				startYear: z.number().int().describe('起始公历年份'),
+				count: z.number().int().min(1).max(60).optional().default(10).describe('查询年数，1-60，默认10'),
 			},
+			outputSchema: standardOutputSchema,
 		},
 		async ({ datetime, gender, startYear, count }) => {
 			try {
-				const ctx = buildBaziContext(datetime);
-				const { dt, solarTime, eightChar, dayMaster } = ctx;
-				const g = toGender(gender);
-				const birthYear = dt.year;
-				const childLimit = ChildLimit.fromSolarTime(solarTime, g);
-
-				// Find the starting fortune index: age = startYear - birthYear + 1
-				const startAge = startYear - birthYear + 1;
-				const results: Array<{
-					year: number;
-					age: number;
-					daYun: { sixtyCycle: string; tenGod: string } | null;
-					xiaoYun: { sixtyCycle: string; tenGod: string };
-					liuNian: { sixtyCycle: string; tenGod: string };
-					specialRelations: string;
-				}> = [];
-
-				// Iterate through Fortune objects
-				let fortune = childLimit.getStartFortune();
-				// Advance to start age
-				const firstAge = fortune.getAge();
-				if (startAge > firstAge) {
-					fortune = fortune.next(startAge - firstAge);
-				}
-
-				for (let i = 0; i < count; i++) {
-					const age = fortune.getAge();
-					const year = birthYear + age - 1;
-
-					// 小运: personal fortune cycle
-					const fortuneSc = fortune.getSixtyCycle();
-					const fortuneTenGod = dayMaster.getTenStar(fortuneSc.getHeavenStem()).getName();
-
-					// 流年: universal year cycle
-					const yearSc = fortune.getSixtyCycleYear().getSixtyCycle();
-					const yearTenGod = dayMaster.getTenStar(yearSc.getHeavenStem()).getName();
-
-					// Find which 大运 this year belongs to
-					let decadeInfo: { sixtyCycle: string; tenGod: string } | null = null;
-					let dec = childLimit.getStartDecadeFortune();
-					for (let d = 0; d < 10; d++) {
-						if (age >= dec.getStartAge() && age <= dec.getEndAge()) {
-							const decSc = dec.getSixtyCycle();
-							decadeInfo = {
-								sixtyCycle: decSc.getName(),
-								tenGod: dayMaster.getTenStar(decSc.getHeavenStem()).getName(),
-							};
-							break;
-						}
-						dec = dec.next(1);
-					}
-
-					results.push({
-						year,
-						age,
-						daYun: decadeInfo,
-						xiaoYun: { sixtyCycle: fortuneSc.getName(), tenGod: fortuneTenGod },
-						liuNian: { sixtyCycle: yearSc.getName(), tenGod: yearTenGod },
-						specialRelations: formatSpecialCycleRelations(yearSc, eightChar),
-					});
-
-					fortune = fortune.next(1);
-				}
-
-				return textResult(joinSections([
-					`出生年: ${birthYear}\n日主: ${dayMaster.getName()}\n查询: ${startYear}起 ${count}年`,
-					mdTable(
-						['年份', '年龄', '大运', '小运', '流年'],
-						results.map((item) => [
-							item.year,
-							`${item.age}岁`,
-							item.daYun ? `${item.daYun.sixtyCycle}(${item.daYun.tenGod})` : '-',
-							`${item.xiaoYun.sixtyCycle}(${item.xiaoYun.tenGod})`,
-							`${item.liuNian.sixtyCycle}(${item.liuNian.tenGod})`,
-						]),
-					),
-					mdTable(
-						['年份', '流年', '胎元/命宫/身宫流年关系'],
-						results.map((item) => [item.year, item.liuNian.sixtyCycle, item.specialRelations]),
-					),
-				]));
-			} catch (e) {
-				return errResult(`小运流年错误: ${e instanceof Error ? e.message : String(e)}`);
-			}
-		},
-	);
-}
-
-function registerFlowMonthTool(server: McpServer) {
-	server.registerTool(
-		'get_bazi_flow_month',
-		{
-			title: '流月排盘',
-			description: '八字流月：输入出生日期和指定年份，获取该年12个月的干支及十神（流月）。',
-			inputSchema: {
-				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-				year: z.number().describe('查询年份（公历年份）'),
-			},
-		},
-		async ({ datetime, year }) => {
-			try {
-				const { eightChar, dayMaster } = buildBaziContext(datetime);
-				const scYear = SixtyCycleYear.fromYear(year);
-				const yearSc = scYear.getSixtyCycle();
-				const months = scYear.getMonths();
-
-				const flowMonths = months.map((m, i) => {
-					const sc = m.getSixtyCycle();
-					const eb = sc.getEarthBranch();
-					const firstDay = m.getFirstDay();
-					const solarDay = firstDay.getSolarDay();
-					const solarStart = `${solarDay.getYear()}-${pad(solarDay.getMonth())}-${pad(solarDay.getDay())}`;
-
-					// Get end date: next month's first day - 1, or next year's first month - 1
-					let solarEnd: string;
-					if (i < months.length - 1) {
-						const nextFirst = months[i + 1].getFirstDay().getSolarDay();
-						const endDay = nextFirst.next(-1);
-						solarEnd = `${endDay.getYear()}-${pad(endDay.getMonth())}-${pad(endDay.getDay())}`;
-					} else {
-						const nextYearFirst = SixtyCycleYear.fromYear(year + 1).getFirstMonth().getFirstDay().getSolarDay();
-						const endDay = nextYearFirst.next(-1);
-						solarEnd = `${endDay.getYear()}-${pad(endDay.getMonth())}-${pad(endDay.getDay())}`;
-					}
-
-					return {
-						monthName: `${eb.getName()}月`,
-						solarDateRange: `${solarStart} ~ ${solarEnd}`,
-						sixtyCycle: sc.getName(),
-						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-						nayin: sc.getSound().getName(),
-						specialRelations: formatSpecialCycleRelations(sc, eightChar),
-					};
+				const data = buildBaziTimelineData(datetime, gender, startYear, count);
+				return structuredResult({
+					ok: true,
+					kind: 'bazi_timeline',
+					summary: '八字大运流年时间轴，含大运、流年、小运和原局触发关系。',
+					data: {
+						input: data.chart.input,
+						startYear: data.startYear,
+						count: data.count,
+						rows: data.rows,
+					},
 				});
-
-				return textResult(joinSections([
-					`年份: ${year} ${yearSc.getName()}\n日主: ${dayMaster.getName()}`,
-					mdTable(
-						['流月', '公历范围', '干支', '十神', '纳音'],
-						flowMonths.map((item) => [
-							item.monthName,
-							item.solarDateRange,
-							item.sixtyCycle,
-							item.tenGod,
-							item.nayin,
-						]),
-					),
-					mdTable(
-						['流月', '干支', '胎元/命宫/身宫关系'],
-						flowMonths.map((item) => [item.monthName, item.sixtyCycle, item.specialRelations]),
-					),
-				]));
 			} catch (e) {
-				return errResult(`流月错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`bazi_timeline 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
-}
 
-function registerFlowDayTool(server: McpServer) {
 	server.registerTool(
-		'get_bazi_flow_day',
+		'bazi_period_detail',
 		{
-			title: '流日排盘',
-			description: '八字流日：输入出生日期和指定年月，获取该月每日的干支及十神（流日）。',
+			title: '八字单一周期详盘',
+			description: '适用场景: 展开某一年、干支月、日或小时与原局/大运流年的叠加证据。不要替代 bazi_structure 的命局结构判断。下一步: 回到用户专题问题组织解读。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-				year: z.number().describe('查询年份（公历年份）'),
-				month: z.number().describe('查询月份（公历月份 1-12）'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+				scope: z.enum(baziPeriodScopes).describe('周期层级: year/month/day/hour'),
+				year: z.number().int().optional().describe('scope=year/month 时必填，公历年份'),
+				month: z.number().int().min(1).max(12).optional().describe('scope=month 时必填，干支月序号 1-12'),
+				date: z.string().optional().describe('scope=day/hour 时必填，YYYY-MM-DD'),
+				hour: z.number().int().min(0).max(23).optional().describe('scope=hour 时必填，0-23'),
 			},
+			outputSchema: standardOutputSchema,
 		},
-		async ({ datetime, year, month }) => {
+		async ({ datetime, gender, scope, year, month, date, hour }) => {
 			try {
-				const { dayMaster } = buildBaziContext(datetime);
-
-				// Determine days in the Gregorian month
-				const daysInMonth = new Date(year, month, 0).getDate();
-				const flowDays: Array<{
-					date: string;
-					sixtyCycle: string;
-					tenGod: string;
-					nayin: string;
-				}> = [];
-
-				for (let d = 1; d <= daysInMonth; d++) {
-					const solarDay = SolarDay.fromYmd(year, month, d);
-					const scDay = SixtyCycleDay.fromSolarDay(solarDay);
-					const sc = scDay.getSixtyCycle();
-					flowDays.push({
-						date: `${year}-${pad(month)}-${pad(d)}`,
-						sixtyCycle: sc.getName(),
-						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-						nayin: sc.getSound().getName(),
-					});
-				}
-
-				return textResult(joinSections([
-					`月份: ${year}-${pad(month)}\n日主: ${dayMaster.getName()}`,
-					mdTable(
-						['日期', '干支', '十神', '纳音'],
-						flowDays.map((item) => [item.date, item.sixtyCycle, item.tenGod, item.nayin]),
-					),
-				]));
-			} catch (e) {
-				return errResult(`流日错误: ${e instanceof Error ? e.message : String(e)}`);
-			}
-		},
-	);
-}
-
-function registerFlowHourTool(server: McpServer) {
-	server.registerTool(
-		'get_bazi_flow_hour',
-		{
-			title: '流时排盘',
-			description: '八字流时：输入出生日期和指定公历日期，获取当日12时辰的干支、十神、纳音、黄道十二神、九星与时辰宜忌。',
-			inputSchema: {
-				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
-				date: z.string().describe('查询日期 YYYY-MM-DD，如 "2024-01-15"'),
-			},
-		},
-		async ({ datetime, date }) => {
-			try {
-				const target = parseDate(date);
-				if (!target) throw new Error('Invalid date format. Use YYYY-MM-DD');
-				const { dayMaster } = buildBaziContext(datetime);
-				const solarDay = SolarDay.fromYmd(target.year, target.month, target.day);
-				const flowDay = SixtyCycleDay.fromSolarDay(solarDay);
-				const daySc = flowDay.getSixtyCycle();
-				const hours = flowDay.getHours().map((hour) => {
-					const sc = hour.getSixtyCycle();
-					const start = hour.getSolarTime();
-					const end = hour.next(7199).getSolarTime();
-					return {
-						timeRange: `${solarTimeMinuteText(start)} ~ ${solarTimeMinuteText(end)}`,
-						hourName: `${sc.getEarthBranch().getName()}时`,
-						sixtyCycle: sc.getName(),
-						tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-						nayin: sc.getSound().getName(),
-						twelveStar: hour.getTwelveStar().getName(),
-						nineStar: hour.getNineStar().toString(),
-						recommends: hour.getRecommends().map((item) => item.getName()).join('、'),
-						avoids: hour.getAvoids().map((item) => item.getName()).join('、'),
-					};
+				const data = buildBaziPeriodData(datetime, gender, scope, year, month, date, hour);
+				return structuredResult({
+					ok: true,
+					kind: 'bazi_period_detail',
+					summary: '八字单一周期详盘，含周期干支、十神、纳音、原局关系和宜忌数据。',
+					data: {
+						input: data.chart.input,
+						target: data.target,
+					},
 				});
-
-				return textResult(joinSections([
-					`日期: ${date}\n流日: ${daySc.getName()}(${dayMaster.getTenStar(daySc.getHeavenStem()).getName()})\n日主: ${dayMaster.getName()}`,
-					mdTable(
-						['时间范围', '时辰', '干支', '十神', '纳音', '十二神', '九星', '宜', '忌'],
-						hours.map((item) => [
-							item.timeRange,
-							item.hourName,
-							item.sixtyCycle,
-							item.tenGod,
-							item.nayin,
-							item.twelveStar,
-							item.nineStar,
-							item.recommends,
-							item.avoids,
-						]),
-					),
-				]));
 			} catch (e) {
-				return errResult(`流时错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`bazi_period_detail 错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+
+	server.registerTool(
+		'bazi_shensha',
+		{
+			title: '八字神煞辅助表',
+			description: '适用场景: 需要神煞作为附加证据时调用。不要单独用神煞断事或替代 bazi_structure。下一步: 回到 bazi_structure 或 bazi_period_detail 与主结构合看。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+			},
+			outputSchema: standardOutputSchema,
+		},
+		async ({ datetime }) => {
+			try {
+				const { eightChar } = buildBaziContext(datetime);
+				const rows = calculateShensha(eightChar);
+				return structuredResult({
+					ok: true,
+					kind: 'bazi_shensha',
+					summary: '常用八字神煞辅助表，包含起法、目标和命中位置。',
+					data: { datetime, rows },
+					warnings: ['神煞为辅助参考，不可单独断事。'],
+				});
+			} catch (e) {
+				return errResult(`bazi_shensha 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
 }
 
-function registerZiweiChartTool(server: McpServer) {
+function registerZiweiTools(server: McpServer) {
 	server.registerTool(
-		'get_ziwei_chart',
+		'ziwei_chart',
 		{
-			title: '紫微斗数排盘',
-			description: '紫微斗数本命盘：输出命主身主、五行局、十二宫主辅杂曜、大限、小限年龄与生年四化。',
+			title: '紫微斗数本命全盘',
+			description: '适用场景: 第一步获取紫微本命十二宫全盘。不要用于展开单宫飞化或运限叠盘。下一步: 调用 ziwei_palace_detail 看单宫，或 ziwei_horoscope_overview 看运限。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
-				gender: z.string().describe('性别：男/女 或 male/female'),
-				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置：sanhe（三合）或 feixing-sihua（飞星四化）'),
-				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('输入日期历法：solar=公历，lunar=农历'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置: sanhe（三合）或 feixing-sihua（飞星四化）'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('输入日期历法: solar=公历，lunar=农历'),
 				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时是否为农历闰月'),
 				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
 			},
+			outputSchema: standardOutputSchema,
 		},
 		async ({ datetime, gender, profile, calendar, isLeapMonth, language }) => {
 			try {
-				const chart = buildZiweiChart(datetime, gender, profile, calendar, isLeapMonth, language);
-				return textResult(joinSections([
-					'紫微斗数排盘',
-					formatZiweiSummary(chart.astrolabe, datetime, chart.calendar, chart.profile, chart.option.timeIndex),
-					joinSections(['十二宫星曜', formatZiweiPalacesTable(chart.astrolabe)]),
-					joinSections(['生年四化', formatZiweiTransformsTable(chart.astrolabe)]),
-					'说明: 本命盘固定输出完整十二宫信息；需要流年/月/日/时用 get_ziwei_horoscope，总览后再用 get_ziwei_scope_detail 深入单层运限。',
-				]));
+				const data = buildZiweiChartData(datetime, gender, profile, calendar, isLeapMonth, language);
+				return structuredResult({
+					ok: true,
+					kind: 'ziwei_chart',
+					summary: '紫微本命全盘，含命主身主、五行局、十二宫、星曜亮度、空宫和生年四化。',
+					data: {
+						summary: data.summary,
+						palaces: data.palaces,
+						transforms: data.transforms,
+					},
+				});
 			} catch (e) {
-				return errResult(`紫微斗数排盘错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`ziwei_chart 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
-}
 
-function registerZiweiHoroscopeTool(server: McpServer) {
 	server.registerTool(
-		'get_ziwei_horoscope',
+		'ziwei_palace_detail',
+		{
+			title: '紫微斗数单宫详盘',
+			description: '适用场景: 展开某个本命宫位的本宫、对宫、三方四正、夹宫、空宫借星、飞化和自化证据。不要用于运限总览。下一步: 要叠运限调用 ziwei_scope_detail 或 ziwei_topic_context。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+				palace: z.string().describe('宫位名称，如 命宫、夫妻、财帛、官禄、疾厄'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置: sanhe 或 feixing-sihua'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法'),
+				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时是否为农历闰月'),
+				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
+			},
+			outputSchema: standardOutputSchema,
+		},
+		async ({ datetime, gender, palace, profile, calendar, isLeapMonth, language }) => {
+			try {
+				const data = buildZiweiPalaceDetailData(datetime, gender, palace, profile, calendar, isLeapMonth, language);
+				return structuredResult({
+					ok: true,
+					kind: 'ziwei_palace_detail',
+					summary: '紫微单宫详盘，含三方四正、夹宫、空宫借星、飞化和自化证据。',
+					data: {
+						summary: data.summary,
+						palace: data.palace,
+						surrounded: data.surrounded,
+						adjacent: data.adjacent,
+						borrowedFromOpposite: data.borrowedFromOpposite,
+						flyingTransforms: data.flyingTransforms,
+					},
+				});
+			} catch (e) {
+				return errResult(`ziwei_palace_detail 错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+
+	server.registerTool(
+		'ziwei_horoscope_overview',
 		{
 			title: '紫微运限总览',
-			description: '紫微斗数运限：输入出生信息和目标时间，紧凑输出大限、小限、流年、流月、流日、流时的宫位、干支、四化和流耀数量提示。',
+			description: '适用场景: 只做大限、小限、流年、流月、流日、流时入口级导航。不要作为最终运势分析。下一步: 必须调用 ziwei_scope_detail 展开单层，或 ziwei_topic_context 做专题取证。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
-				gender: z.string().describe('性别：男/女 或 male/female'),
-				targetDatetime: z.string().describe('目标日期时间 YYYY-MM-DD HH:MM，用于推大限/小限/流年/流月/流日/流时'),
-				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置：sanhe（三合）或 feixing-sihua（飞星四化）'),
-				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法：solar=公历，lunar=农历'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+				targetDatetime: z.string().describe('目标日期时间 YYYY-MM-DD HH:MM'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置: sanhe 或 feixing-sihua'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法'),
 				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时出生日期是否为农历闰月'),
 				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
 			},
+			outputSchema: standardOutputSchema,
 		},
 		async ({ birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language }) => {
 			try {
-				const ctx = buildZiweiHoroscope(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
-				return textResult(joinSections([
-					'紫微运限总览',
-					`出生: ${birthDatetime} (${ctx.calendar === 'solar' ? '公历' : '农历'})\n目标: ${targetDatetime}\n目标公历: ${ctx.horoscope.solarDate}\n目标农历: ${ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[ctx.profile]} (${ctx.profile})\n目标时辰索引: ${ctx.targetTimeIndex}`,
-					formatZiweiHoroscopeOverview(ctx, ctx.horoscope),
-					'使用建议: 这个工具只给总览。若要展开某一层的十二宫映射和流耀，继续调用 get_ziwei_scope_detail，并指定 scope=decadal/yearly/monthly/daily/hourly/age。',
-				]));
+				const data = buildZiweiHoroscopeOverviewData(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
+				return structuredResult({
+					ok: true,
+					kind: 'ziwei_horoscope_overview',
+					summary: '紫微运限总览，只做导航，不展开十二宫；下一步调用 ziwei_scope_detail 展开单层，或调用 ziwei_topic_context 做专题取证。',
+					data: {
+						birthDatetime,
+						targetDatetime,
+						profile: data.ctx.profile,
+						calendar: data.ctx.calendar,
+						targetSolarDate: data.ctx.horoscope.solarDate,
+						targetLunarDate: data.ctx.horoscope.lunarDate,
+						overview: data.overview,
+					},
+				});
 			} catch (e) {
-				return errResult(`紫微运限错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`ziwei_horoscope_overview 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
-}
 
-function registerZiweiScopeDetailTool(server: McpServer) {
 	server.registerTool(
-		'get_ziwei_scope_detail',
+		'ziwei_scope_detail',
 		{
 			title: '紫微单层运限详盘',
-			description: '紫微斗数单层运限详盘：只展开一个层级的大限/小限/流年/流月/流日/流时，避免一次返回全部运限导致上下文过大。',
+			description: '适用场景: 展开一个层级的大限/小限/流年/流月/流日/流时十二宫映射、流耀、四化与重点宫位三方四正。不要一次请求全部层级。下一步: 专题整合调用 ziwei_topic_context。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
-				gender: z.string().describe('性别：男/女 或 male/female'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
 				targetDatetime: z.string().describe('目标日期时间 YYYY-MM-DD HH:MM'),
-				scope: z.enum(ziweiScopes).describe('要展开的层级：decadal/age/yearly/monthly/daily/hourly'),
-				focusPalace: z.string().optional().default('命宫').describe('重点宫位，默认命宫；仅 decadal/yearly/monthly/daily/hourly 用于三方四正'),
-				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置：sanhe（三合）或 feixing-sihua（飞星四化）'),
-				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法：solar=公历，lunar=农历'),
+				scope: z.enum(ziweiScopes).describe('层级: decadal/age/yearly/monthly/daily/hourly'),
+				focusPalace: z.string().optional().default('命宫').describe('重点宫位，默认命宫；age 层级只返回小限宫位'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置: sanhe 或 feixing-sihua'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法'),
 				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时出生日期是否为农历闰月'),
 				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
 			},
+			outputSchema: standardOutputSchema,
 		},
 		async ({ birthDatetime, gender, targetDatetime, scope, focusPalace, profile, calendar, isLeapMonth, language }) => {
 			try {
-				const ctx = buildZiweiHoroscope(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
-				const normalizedScope = normalizeZiweiScope(scope);
-				const item = scopeItem(ctx.horoscope, normalizedScope);
-				return textResult(joinSections([
-					`${ziweiScopeLabels[normalizedScope]}详盘`,
-					`出生: ${birthDatetime}\n目标: ${targetDatetime}\n目标公历: ${ctx.horoscope.solarDate}\n目标农历: ${ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[ctx.profile]} (${ctx.profile})`,
-					mdTable(['层级', '干支', '所在原盘宫', '四化', '虚岁'], [[
-						ziweiScopeLabels[normalizedScope],
-						horoscopeItemBranch(item),
-						palaceLabel(ctx.astrolabe, item.index),
-						mutagenText(item),
-						normalizedScope === 'age' ? `${ctx.horoscope.age.nominalAge}虚岁` : '-',
-					]]),
-					joinSections([`${ziweiScopeLabels[normalizedScope]}十二宫映射`, formatZiweiScopePalacesTable(ctx.astrolabe, item)]),
-					joinSections([normalizedScope === 'age' ? '小限宫位' : `${focusPalace}三方四正`, formatZiweiScopeFocus(ctx.horoscope, normalizedScope, focusPalace)]),
-				]));
+				const data = buildZiweiScopeDetailData(birthDatetime, gender, targetDatetime, scope, focusPalace, profile, calendar, isLeapMonth, language);
+				return structuredResult({
+					ok: true,
+					kind: 'ziwei_scope_detail',
+					summary: '紫微单层运限详盘，含十二宫映射、流耀、四化和重点宫位证据。',
+					data: {
+						birthDatetime,
+						targetDatetime,
+						scope: data.scope,
+						focusPalace: data.focusPalace,
+						item: data.item,
+						palaces: data.palaces,
+						focus: data.focus,
+					},
+				});
 			} catch (e) {
-				return errResult(`紫微单层运限错误: ${e instanceof Error ? e.message : String(e)}`);
+				return errResult(`ziwei_scope_detail 错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+
+	server.registerTool(
+		'ziwei_topic_context',
+		{
+			title: '紫微专题取证',
+			description: '适用场景: 针对自我、事业、财富、关系、健康、家庭聚合本命与流年证据。不要直接输出最终断语。下一步: 对关键宫位调用 ziwei_palace_detail 或 ziwei_scope_detail。',
+			inputSchema: {
+				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
+				gender: z.string().describe('性别: 男/女 或 male/female'),
+				targetDatetime: z.string().describe('目标日期时间 YYYY-MM-DD HH:MM'),
+				topic: z.enum(ziweiTopics).describe('专题: self/career/wealth/relationship/health/family'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置: sanhe 或 feixing-sihua'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法'),
+				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时出生日期是否为农历闰月'),
+				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
+			},
+			outputSchema: standardOutputSchema,
+		},
+		async ({ birthDatetime, gender, targetDatetime, topic, profile, calendar, isLeapMonth, language }) => {
+			try {
+				const data = buildZiweiTopicContextData(birthDatetime, gender, targetDatetime, topic, profile, calendar, isLeapMonth, language);
+				return structuredResult({
+					ok: true,
+					kind: 'ziwei_topic_context',
+					summary: '紫微专题取证索引，返回专题相关宫位的精简本命证据、流年证据和下一步 detail 调用入口。',
+					data: {
+						birthDatetime,
+						targetDatetime,
+						topic: data.topic,
+						topicPalaces: data.topicPalaces,
+						runtime: data.runtime,
+						palaces: data.palaces,
+						overview: data.overview,
+					},
+					warnings: data.warnings,
+				});
+			} catch (e) {
+				return errResult(`ziwei_topic_context 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		},
 	);
@@ -1565,16 +2274,8 @@ function createServer() {
 		version: '1.0.0',
 	});
 
-	registerGanzhiTools(server);
-	registerBaziChartTool(server);
-	registerBaziShenshaTool(server);
-	registerBaziFortuneTool(server);
-	registerFlowMonthTool(server);
-	registerFlowDayTool(server);
-	registerFlowHourTool(server);
-	registerZiweiChartTool(server);
-	registerZiweiHoroscopeTool(server);
-	registerZiweiScopeDetailTool(server);
+	registerBaziTools(server);
+	registerZiweiTools(server);
 
 	return server;
 }
@@ -1582,23 +2283,22 @@ function createServer() {
 // ===== Export =====
 
 const allTools = [
-	{ name: 'convert_to_ganzhi', title: '公历转干支' },
-	{ name: 'get_current_ganzhi', title: '获取当前干支' },
-	{ name: 'get_bazi_chart', title: '八字排盘' },
-	{ name: 'get_bazi_shensha', title: '八字神煞' },
-	{ name: 'get_bazi_fortune', title: '推算大运流年' },
-	{ name: 'get_bazi_flow_month', title: '流月排盘' },
-	{ name: 'get_bazi_flow_day', title: '流日排盘' },
-	{ name: 'get_bazi_flow_hour', title: '流时排盘' },
-	{ name: 'get_ziwei_chart', title: '紫微斗数排盘' },
-	{ name: 'get_ziwei_horoscope', title: '紫微运限总览' },
-	{ name: 'get_ziwei_scope_detail', title: '紫微单层运限详盘' },
+	{ name: 'bazi_chart', title: '八字本命基础盘' },
+	{ name: 'bazi_structure', title: '八字命局结构证据' },
+	{ name: 'bazi_timeline', title: '八字大运流年时间轴' },
+	{ name: 'bazi_period_detail', title: '八字单一周期详盘' },
+	{ name: 'bazi_shensha', title: '八字神煞辅助表' },
+	{ name: 'ziwei_chart', title: '紫微斗数本命全盘' },
+	{ name: 'ziwei_palace_detail', title: '紫微斗数单宫详盘' },
+	{ name: 'ziwei_horoscope_overview', title: '紫微运限总览' },
+	{ name: 'ziwei_scope_detail', title: '紫微单层运限详盘' },
+	{ name: 'ziwei_topic_context', title: '紫微专题取证' },
 ];
 
 function serverInfoText() {
 	return joinSections([
 		'Lunar Calendar MCP Server',
-		'农历/公历转换、天干地支、八字命盘、大运小运流年流月流日流时、神煞、刑冲合害、五行统计、紫微斗数排盘与运限',
+		'八字本命基础盘、命局结构证据、大运流年时间轴、单一周期详盘、神煞辅助表，以及紫微本命全盘、单宫详盘、运限总览、单层运限详盘、专题取证。',
 		'MCP endpoint: /lunar',
 		mdTable(['Tool', 'Title'], allTools.map((tool) => [tool.name, tool.title])),
 	]);
