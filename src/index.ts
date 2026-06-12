@@ -1479,23 +1479,33 @@ function formatLiuyaoBodies(baseHexagram: LiuyaoHexagram, mainLines: LiuyaoLineR
 	};
 }
 
-function formatLiuyaoTable(title: string, lines: LiuyaoLineRecord[]) {
+function formatLiuyaoCombinedTable(
+	originalHexagram: LiuyaoHexagram,
+	changedHexagram: LiuyaoHexagram,
+	mainLines: LiuyaoLineRecord[],
+	changedLines: LiuyaoLineRecord[],
+) {
+	const changedByLine = new Map(changedLines.map((line) => [line.line, line]));
 	return joinSections([
-		title,
+		`主卦/变卦：${originalHexagram.name} → ${changedHexagram.name}（主卦${originalHexagram.palace}宫${originalHexagram.palaceElement}，${originalHexagram.stage}，世在${liuyaoLineLabels[originalHexagram.worldLine]}，应在${liuyaoLineLabels[originalHexagram.responseLine]}；变卦六亲沿用主卦卦宫五行）`,
 		mdTable(
-			['爻位', '六神', '六亲', '干支', '世应', '伏神', '是否变卦', '神煞', '长生'],
-			[...lines]
+			['爻位', '六神', '世应', '主卦六亲', '主卦干支', '伏神', '是否变卦', '主卦神煞', '主卦长生', '变卦六亲', '变卦干支', '变卦神煞', '变卦长生'],
+			[...mainLines]
 				.sort((a, b) => b.line - a.line)
 				.map((line) => [
 					line.yaoText,
 					line.sixSpirit,
+					line.worldResponse,
 					line.relative,
 					liuyaoStemBranchText(line),
-					line.worldResponse,
 					line.hidden,
 					line.isMoving ? '是' : '-',
 					line.shensha,
 					line.changsheng,
+					changedByLine.get(line.line)?.relative ?? '-',
+					changedByLine.get(line.line) ? liuyaoStemBranchText(changedByLine.get(line.line)!) : '-',
+					changedByLine.get(line.line)?.shensha ?? '-',
+					changedByLine.get(line.line)?.changsheng ?? '-',
 				]),
 		),
 	]);
@@ -1537,12 +1547,10 @@ function formatLiuyaoChartMarkdown(data: ReturnType<typeof buildLiuyaoChartData>
 			`卦身：${data.bodies.guaBody}；世身：${data.bodies.worldBody}`,
 			`动爻：${data.movingLineList.length > 0 ? data.movingLineList.map((line) => liuyaoLineLabels[line]).join('、') : '无（静卦）'}`,
 		].join('\n'),
-		formatLiuyaoTable(
-			`主卦：${data.originalHexagram.name}（${data.originalHexagram.palace}宫${data.originalHexagram.palaceElement}，${data.originalHexagram.stage}，世在${liuyaoLineLabels[data.originalHexagram.worldLine]}，应在${liuyaoLineLabels[data.originalHexagram.responseLine]}）`,
+		formatLiuyaoCombinedTable(
+			data.originalHexagram,
+			data.changedHexagram,
 			data.mainLines,
-		),
-		formatLiuyaoTable(
-			`变卦：${data.changedHexagram.name}（六亲、世应沿用主卦${data.originalHexagram.palace}宫${data.originalHexagram.palaceElement}）`,
 			data.changedLines,
 		),
 		'边界: 本工具只输出排盘底稿，不输出最终断语；伏神按本宫首卦补缺六亲，变卦六亲按主卦卦宫五行计算。',

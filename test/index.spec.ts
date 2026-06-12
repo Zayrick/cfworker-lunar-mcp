@@ -312,12 +312,11 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(text).toContain('空亡：年空亡');
 		expect(text).toContain('卦身：');
 		expect(text).toContain('世身：');
-		expect(text).toContain('主卦：火泽睽');
-		expect(text).toContain('变卦：火雷噬嗑');
-		expect(text).toContain('| 爻位 | 六神 | 六亲 | 干支 | 世应 | 伏神 | 是否变卦 | 神煞 | 长生 |');
+		expect(text).toContain('主卦/变卦：火泽睽 → 火雷噬嗑');
+		expect(text).toContain('| 爻位 | 六神 | 世应 | 主卦六亲 | 主卦干支 | 伏神 | 是否变卦 | 主卦神煞 | 主卦长生 | 变卦六亲 | 变卦干支 | 变卦神煞 | 变卦长生 |');
 		expect(text).toContain('| 三爻 ━ ━ 阴 |');
 		expect(text).toContain('| 是 |');
-		expect(text).toContain('六亲、世应沿用主卦艮宫土');
+		expect(text).toContain('变卦六亲沿用主卦卦宫五行');
 	});
 
 	it.each([
