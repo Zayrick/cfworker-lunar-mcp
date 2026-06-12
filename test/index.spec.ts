@@ -154,16 +154,16 @@ describe('Lunar Calendar MCP Server', () => {
 
 		const byName = new Map(tools.map((tool) => [tool.name, tool]));
 		const expectedTitles: Record<string, string> = {
-			bazi_chart: '八字本命基础盘',
-			bazi_structure: '八字命局结构证据',
-			bazi_timeline: '八字大运流年时间轴',
-			bazi_period_detail: '八字单一周期详盘',
-			bazi_shensha: '八字神煞辅助表',
-			ziwei_chart: '紫微斗数本命全盘',
-			ziwei_palace_detail: '紫微斗数单宫详盘',
-			ziwei_horoscope_overview: '紫微运限总览',
-			ziwei_scope_detail: '紫微单层运限详盘',
-			ziwei_topic_context: '紫微专题取证',
+			bazi_chart: '八字排盘',
+			bazi_structure: '八字命局分析',
+			bazi_timeline: '八字大运流年',
+			bazi_period_detail: '八字周期详盘',
+			bazi_shensha: '八字神煞参考',
+			ziwei_chart: '紫微斗数排盘',
+			ziwei_palace_detail: '紫微宫位详盘',
+			ziwei_horoscope_overview: '紫微运限概览',
+			ziwei_scope_detail: '紫微运限详盘',
+			ziwei_topic_context: '紫微专题分析',
 		};
 
 		for (const name of newToolNames) {

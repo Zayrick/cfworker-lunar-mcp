@@ -1960,7 +1960,7 @@ function registerBaziTools(server: McpServer) {
 	server.registerTool(
 		'bazi_chart',
 		{
-			title: '八字本命基础盘',
+			title: '八字排盘',
 			description: '适用场景: 第一步获取八字客观基础盘。不要用于直接判断身强身弱、格局或用神。下一步: 调用 bazi_structure 做命局结构取证，或 bazi_timeline 看阶段触发。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM，按出生地当地民用时间输入'),
@@ -1980,7 +1980,7 @@ function registerBaziTools(server: McpServer) {
 	server.registerTool(
 		'bazi_structure',
 		{
-			title: '八字命局结构证据',
+			title: '八字命局分析',
 			description: '适用场景: 在 bazi_chart 后分析日主、月令、通根、透干、五行、十神、刑冲合害与旺衰取用证据。不要输出最终断命结论。下一步: 调用 bazi_timeline 或 bazi_period_detail 验证阶段。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
@@ -2000,7 +2000,7 @@ function registerBaziTools(server: McpServer) {
 	server.registerTool(
 		'bazi_timeline',
 		{
-			title: '八字大运流年时间轴',
+			title: '八字大运流年',
 			description: '适用场景: 在本命结构后查看大运、流年、小运、年龄、年份和原局触发。不要用于单独断某一年细节。下一步: 对重点年份调用 bazi_period_detail。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
@@ -2022,7 +2022,7 @@ function registerBaziTools(server: McpServer) {
 	server.registerTool(
 		'bazi_period_detail',
 		{
-			title: '八字单一周期详盘',
+			title: '八字周期详盘',
 			description: '适用场景: 展开某一年、干支月、日或小时与原局/大运流年的叠加证据。不要替代 bazi_structure 的命局结构判断。下一步: 回到用户专题问题组织解读。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
@@ -2047,7 +2047,7 @@ function registerBaziTools(server: McpServer) {
 	server.registerTool(
 		'bazi_shensha',
 		{
-			title: '八字神煞辅助表',
+			title: '八字神煞参考',
 			description: '适用场景: 需要神煞作为附加证据时调用。不要单独用神煞断事或替代 bazi_structure。下一步: 回到 bazi_structure 或 bazi_period_detail 与主结构合看。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
@@ -2073,7 +2073,7 @@ function registerZiweiTools(server: McpServer) {
 	server.registerTool(
 		'ziwei_chart',
 		{
-			title: '紫微斗数本命全盘',
+			title: '紫微斗数排盘',
 			description: '适用场景: 第一步获取紫微本命十二宫全盘。不要用于展开单宫飞化或运限叠盘。下一步: 调用 ziwei_palace_detail 看单宫，或 ziwei_horoscope_overview 看运限。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
@@ -2097,7 +2097,7 @@ function registerZiweiTools(server: McpServer) {
 	server.registerTool(
 		'ziwei_palace_detail',
 		{
-			title: '紫微斗数单宫详盘',
+			title: '紫微宫位详盘',
 			description: '适用场景: 展开某个本命宫位的本宫、对宫、三方四正、夹宫、空宫借星、飞化和自化证据。不要用于运限总览。下一步: 要叠运限调用 ziwei_scope_detail 或 ziwei_topic_context。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
@@ -2122,7 +2122,7 @@ function registerZiweiTools(server: McpServer) {
 	server.registerTool(
 		'ziwei_horoscope_overview',
 		{
-			title: '紫微运限总览',
+			title: '紫微运限概览',
 			description: '适用场景: 只做大限、小限、流年、流月、流日、流时入口级导航。不要作为最终运势分析。下一步: 必须调用 ziwei_scope_detail 展开单层，或 ziwei_topic_context 做专题取证。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
@@ -2147,7 +2147,7 @@ function registerZiweiTools(server: McpServer) {
 	server.registerTool(
 		'ziwei_scope_detail',
 		{
-			title: '紫微单层运限详盘',
+			title: '紫微运限详盘',
 			description: '适用场景: 展开一个层级的大限/小限/流年/流月/流日/流时十二宫映射、流耀、四化与重点宫位三方四正。不要一次请求全部层级。下一步: 专题整合调用 ziwei_topic_context。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
@@ -2174,7 +2174,7 @@ function registerZiweiTools(server: McpServer) {
 	server.registerTool(
 		'ziwei_topic_context',
 		{
-			title: '紫微专题取证',
+			title: '紫微专题分析',
 			description: '适用场景: 针对自我、事业、财富、关系、健康、家庭聚合本命与流年证据。不要直接输出最终断语。下一步: 对关键宫位调用 ziwei_palace_detail 或 ziwei_scope_detail。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
@@ -2215,22 +2215,22 @@ function createServer() {
 // ===== Export =====
 
 const allTools = [
-	{ name: 'bazi_chart', title: '八字本命基础盘' },
-	{ name: 'bazi_structure', title: '八字命局结构证据' },
-	{ name: 'bazi_timeline', title: '八字大运流年时间轴' },
-	{ name: 'bazi_period_detail', title: '八字单一周期详盘' },
-	{ name: 'bazi_shensha', title: '八字神煞辅助表' },
-	{ name: 'ziwei_chart', title: '紫微斗数本命全盘' },
-	{ name: 'ziwei_palace_detail', title: '紫微斗数单宫详盘' },
-	{ name: 'ziwei_horoscope_overview', title: '紫微运限总览' },
-	{ name: 'ziwei_scope_detail', title: '紫微单层运限详盘' },
-	{ name: 'ziwei_topic_context', title: '紫微专题取证' },
+	{ name: 'bazi_chart', title: '八字排盘' },
+	{ name: 'bazi_structure', title: '八字命局分析' },
+	{ name: 'bazi_timeline', title: '八字大运流年' },
+	{ name: 'bazi_period_detail', title: '八字周期详盘' },
+	{ name: 'bazi_shensha', title: '八字神煞参考' },
+	{ name: 'ziwei_chart', title: '紫微斗数排盘' },
+	{ name: 'ziwei_palace_detail', title: '紫微宫位详盘' },
+	{ name: 'ziwei_horoscope_overview', title: '紫微运限概览' },
+	{ name: 'ziwei_scope_detail', title: '紫微运限详盘' },
+	{ name: 'ziwei_topic_context', title: '紫微专题分析' },
 ];
 
 function serverInfoText() {
 	return joinSections([
 		'Lunar Calendar MCP Server',
-		'八字本命基础盘、命局结构证据、大运流年时间轴、单一周期详盘、神煞辅助表，以及紫微本命全盘、单宫详盘、运限总览、单层运限详盘、专题取证。',
+		`${allTools.map((tool) => tool.title).join('、')}。`,
 		'MCP endpoint: /lunar',
 		mdTable(['Tool', 'Title'], allTools.map((tool) => [tool.name, tool.title])),
 	]);
