@@ -33,13 +33,7 @@ const legacyToolNames = [
 
 type ToolCallResult = {
 	content?: Array<{ type: string; text: string }>;
-	structuredContent?: {
-		ok?: boolean;
-		kind?: string;
-		summary?: string;
-		data?: Record<string, unknown>;
-		warnings?: string[];
-	};
+	structuredContent?: unknown;
 	isError?: boolean;
 };
 
@@ -104,14 +98,15 @@ function toolText(result: ToolCallResult) {
 	return result.content?.[0]?.text ?? '';
 }
 
-function expectStructuredResult(result: ToolCallResult, kind: string) {
+function expectMarkdownResult(result: ToolCallResult, expectedText: string) {
 	expect(result.isError).not.toBe(true);
-	expect(result.content ?? []).toHaveLength(0);
-	expect(result.structuredContent).toMatchObject({
-		ok: true,
-		kind,
-	});
-	expect(result.structuredContent?.data).toBeDefined();
+	expect(result.structuredContent).toBeUndefined();
+	expect(result.content ?? []).toHaveLength(1);
+	expect(result.content?.[0]?.type).toBe('text');
+	const text = toolText(result);
+	expect(text).toContain(expectedText);
+	expect(text).toMatch(/\| .+ \|/);
+	return text;
 }
 
 describe('Lunar Calendar MCP Server', () => {
@@ -151,7 +146,7 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(body).toContain('bazi_chart');
 	});
 
-	it('exposes only the new MCP tool surface with descriptions and output schemas', async () => {
+	it('exposes only the new MCP tool surface with descriptions and markdown-only outputs', async () => {
 		const tools = await listTools();
 		const names = tools.map((tool) => tool.name);
 		expect(names).toEqual(newToolNames);
@@ -179,9 +174,7 @@ describe('Lunar Calendar MCP Server', () => {
 			expect(tool?.description).toContain('下一步');
 		}
 
-		for (const name of ['bazi_chart', 'bazi_structure', 'bazi_timeline', 'ziwei_chart', 'ziwei_scope_detail']) {
-			expect(byName.get(name)?.outputSchema).toBeDefined();
-		}
+		for (const name of newToolNames) expect(byName.get(name)?.outputSchema).toBeUndefined();
 	});
 
 	it.each([
@@ -193,7 +186,7 @@ describe('Lunar Calendar MCP Server', () => {
 		{
 			name: 'bazi_structure',
 			args: { datetime: '2024-01-15 08:30', gender: '男' },
-			expectedSummary: '八字结构取证数据',
+			expectedSummary: '八字命局结构证据',
 		},
 		{
 			name: 'bazi_timeline',
@@ -213,12 +206,12 @@ describe('Lunar Calendar MCP Server', () => {
 		{
 			name: 'ziwei_chart',
 			args: { datetime: '2024-01-15 08:30', gender: '男', profile: 'sanhe' },
-			expectedSummary: '紫微本命全盘',
+			expectedSummary: '紫微斗数本命全盘',
 		},
 		{
 			name: 'ziwei_palace_detail',
 			args: { datetime: '2024-01-15 08:30', gender: '男', palace: '命宫' },
-			expectedSummary: '紫微单宫详盘',
+			expectedSummary: '紫微斗数单宫详盘',
 		},
 		{
 			name: 'ziwei_horoscope_overview',
@@ -251,40 +244,28 @@ describe('Lunar Calendar MCP Server', () => {
 			},
 			expectedSummary: '紫微专题取证',
 		},
-	])('returns structuredContent without markdown content for $name', async ({ name, args, expectedSummary }) => {
+	])('returns markdown content without structuredContent for $name', async ({ name, args, expectedSummary }) => {
 		const result = await callTool(name, args);
-		expectStructuredResult(result, name);
-		expect(result.structuredContent?.summary).toContain(expectedSummary);
+		expectMarkdownResult(result, expectedSummary);
 	});
 
-	it('keeps ziwei topic context compact and points to detail tools', async () => {
+	it('keeps ziwei topic context compact and points to detail tools in markdown', async () => {
 		const result = await callTool('ziwei_topic_context', {
 			birthDatetime: '2024-01-15 08:30',
 			gender: '男',
 			targetDatetime: '2026-06-12 18:00',
 			topic: 'career',
 		});
-		expectStructuredResult(result, 'ziwei_topic_context');
-		const data = result.structuredContent?.data as {
-			palaces?: Array<Record<string, unknown>>;
-			runtime?: Record<string, unknown>;
-		};
-		const palaces = data.palaces ?? [];
-		expect(JSON.stringify(data).length).toBeLessThan(25000);
-		expect(data.runtime).toMatchObject({ profile: 'sanhe', calendar: 'solar' });
-		expect(palaces.map((palace) => palace.name)).toEqual(['官禄', '迁移', '财帛', '福德']);
-
-		const firstPalace = palaces[0] as Record<string, unknown>;
-		expect(firstPalace.origin).toBeUndefined();
-		expect(firstPalace.originSurrounded).toBeUndefined();
-		expect(firstPalace.yearlySurrounded).toBeUndefined();
-		expect(firstPalace.natal).toMatchObject({ name: '官禄' });
-		expect(firstPalace.natalSurrounded).toBeInstanceOf(Array);
-		expect(firstPalace.nextCalls).toEqual([
-			{ tool: 'ziwei_palace_detail', arguments: { palace: '官禄' } },
-			{ tool: 'ziwei_scope_detail', arguments: { scope: 'yearly', focusPalace: '官禄' } },
-		]);
-		expect(result.structuredContent?.warnings?.[0]).toContain('索引级证据');
+		const text = expectMarkdownResult(result, '紫微专题取证');
+		expect(text.length).toBeLessThan(6000);
+		for (const palace of ['官禄', '迁移', '财帛', '福德']) expect(text).toContain(`| ${palace} |`);
+		expect(text).toContain('目标公历');
+		expect(text).toContain('本命飞化');
+		expect(text).toContain('建议调用');
+		expect(text).toContain('ziwei_palace_detail(palace=官禄)');
+		expect(text).toContain('ziwei_scope_detail(scope=yearly, focusPalace=官禄)');
+		expect(text).not.toContain('nextCalls');
+		expect(text).not.toContain('"natalSurrounded"');
 	});
 
 	it('keeps overview and structure tools inside their intended boundaries', async () => {
@@ -292,18 +273,18 @@ describe('Lunar Calendar MCP Server', () => {
 			datetime: '2024-01-15 08:30',
 			gender: '男',
 		});
-		expectStructuredResult(structure, 'bazi_structure');
-		expect(structure.structuredContent?.summary).toContain('不直接给');
-		expect(structure.structuredContent?.summary).not.toMatch(/最终断命结论[:：]/);
+		const structureText = expectMarkdownResult(structure, '八字命局结构证据');
+		expect(structureText).toContain('不输出最终断命结论');
+		expect(structureText).not.toMatch(/最终断命结论[:：]/);
 
 		const overview = await callTool('ziwei_horoscope_overview', {
 			birthDatetime: '2024-01-15 08:30',
 			gender: '男',
 			targetDatetime: '2026-06-12 18:00',
 		});
-		expectStructuredResult(overview, 'ziwei_horoscope_overview');
-		expect(overview.structuredContent?.summary).toContain('只做导航');
-		expect(overview.structuredContent?.summary).toContain('下一步调用 ziwei_scope_detail');
+		const overviewText = expectMarkdownResult(overview, '紫微运限总览');
+		expect(overviewText).toContain('只做导航');
+		expect(overviewText).toContain('下一步必须调用 ziwei_scope_detail');
 	});
 
 	it.each([
