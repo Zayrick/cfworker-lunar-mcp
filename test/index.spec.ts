@@ -49,6 +49,9 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(body).toContain('MCP endpoint: /lunar');
 		expect(body).toContain('| convert_to_ganzhi | 公历转干支 |');
 		expect(body).toContain('| get_current_ganzhi | 获取当前干支 |');
+		expect(body).toContain('| get_ziwei_chart | 紫微斗数排盘 |');
+		expect(body).toContain('| get_ziwei_horoscope | 紫微运限总览 |');
+		expect(body).toContain('| get_ziwei_scope_detail | 紫微单层运限详盘 |');
 	});
 
 	it('returns server info on root path (integration style)', async () => {
@@ -102,6 +105,9 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(tools.get('get_bazi_shensha')?.title).toBe('八字神煞');
 		expect(tools.get('get_bazi_fortune')?.title).toBe('推算大运流年');
 		expect(tools.get('get_bazi_flow_hour')?.title).toBe('流时排盘');
+		expect(tools.get('get_ziwei_chart')?.title).toBe('紫微斗数排盘');
+		expect(tools.get('get_ziwei_horoscope')?.title).toBe('紫微运限总览');
+		expect(tools.get('get_ziwei_scope_detail')?.title).toBe('紫微单层运限详盘');
 	});
 
 	it('returns tool content as compact markdown text instead of JSON dumps', async () => {
@@ -155,6 +161,51 @@ describe('Lunar Calendar MCP Server', () => {
 		expect(text).toContain('| 神煞 | 起法 | 目标 | 命中位置 |');
 		expect(text).toContain('天乙贵人');
 		expect(text).toContain('驿马');
+	});
+
+	it('returns ziwei chart with palaces and transforms', async () => {
+		const text = await callTool('get_ziwei_chart', {
+			datetime: '2024-01-15 08:30',
+			gender: '男',
+			profile: 'sanhe',
+		});
+		expect(text).toContain('紫微斗数排盘');
+		expect(text).toContain('| 命主 | 身主 | 五行局 | 生肖 | 星座 | 命宫地支 | 身宫地支 |');
+		expect(text).toContain('十二宫星曜');
+		expect(text).toContain('| 宫位 | 干支 | 标记 | 主星 | 辅星 | 杂耀 | 长生/博士/将前/岁前 | 大限 | 小限年龄 |');
+		expect(text).toContain('生年四化');
+	});
+
+	it('returns ziwei horoscope overview without dumping full palaces', async () => {
+		const text = await callTool('get_ziwei_horoscope', {
+			birthDatetime: '2024-01-15 08:30',
+			gender: '男',
+			targetDatetime: '2026-06-12 18:00',
+			profile: 'sanhe',
+		});
+		expect(text).toContain('紫微运限总览');
+		expect(text).toContain('| 层级 | 干支 | 所在原盘宫 | 四化 | 流耀提示 |');
+		expect(text).toContain('大限');
+		expect(text).toContain('流年');
+		expect(text).toContain('流月');
+		expect(text).toContain('流日');
+		expect(text).toContain('流时');
+		expect(text).toContain('get_ziwei_scope_detail');
+	});
+
+	it('returns focused ziwei scope detail for a single layer', async () => {
+		const text = await callTool('get_ziwei_scope_detail', {
+			birthDatetime: '2024-01-15 08:30',
+			gender: '男',
+			targetDatetime: '2026-06-12 18:00',
+			scope: 'yearly',
+			focusPalace: '命宫',
+		});
+		expect(text).toContain('流年详盘');
+		expect(text).toContain('| 层级 | 干支 | 所在原盘宫 | 四化 | 虚岁 |');
+		expect(text).toContain('流年十二宫映射');
+		expect(text).toContain('| 序 | 运限宫位 | 原盘宫位 | 原盘干支 | 原盘主星 | 原盘辅星 | 流耀 |');
+		expect(text).toContain('命宫三方四正');
 	});
 
 	it('does not route subpaths as MCP endpoints', async () => {

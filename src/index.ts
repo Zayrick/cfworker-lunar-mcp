@@ -1,6 +1,12 @@
 import { createMcpHandler } from 'agents/mcp';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { astro } from 'iztro';
+import type { HoroscopeItem, Option as ZiweiOption } from 'iztro/lib/data/types';
+import type { IFunctionalAstrolabe } from 'iztro/lib/astro/FunctionalAstrolabe';
+import type { IFunctionalHoroscope } from 'iztro/lib/astro/FunctionalHoroscope';
+import type { IFunctionalPalace } from 'iztro/lib/astro/FunctionalPalace';
+import type { IFunctionalStar } from 'iztro/lib/star/FunctionalStar';
 import {
 	SolarTime,
 	SolarDay,
@@ -72,6 +78,338 @@ function mdTable(headers: string[], rows: unknown[][]) {
 
 function joinSections(sections: Array<string | undefined | null | false>) {
 	return sections.filter(Boolean).join('\n\n');
+}
+
+// ===== Ziwei Doushu Helpers =====
+
+const ziweiProfiles = ['sanhe', 'feixing-sihua'] as const;
+type ZiweiProfile = typeof ziweiProfiles[number];
+
+const ziweiProfileLabels: Record<ZiweiProfile, string> = {
+	sanhe: '三合',
+	'feixing-sihua': '飞星四化',
+};
+
+const ziweiLanguages = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'vi-VN'] as const;
+type ZiweiLanguage = typeof ziweiLanguages[number];
+
+type ZiweiCalendar = 'solar' | 'lunar';
+
+const ziweiScopes = ['decadal', 'age', 'yearly', 'monthly', 'daily', 'hourly'] as const;
+type ZiweiScope = typeof ziweiScopes[number];
+type ZiweiRuntimeScope = Exclude<ZiweiScope, 'age'>;
+
+const ziweiScopeLabels: Record<ZiweiScope, string> = {
+	decadal: '大限',
+	age: '小限',
+	yearly: '流年',
+	monthly: '流月',
+	daily: '流日',
+	hourly: '流时',
+};
+
+function isOneOf<T extends readonly string[]>(value: string, options: T): value is T[number] {
+	return (options as readonly string[]).includes(value);
+}
+
+function normalizeZiweiProfile(profile?: string): ZiweiProfile {
+	if (!profile) return 'sanhe';
+	if (isOneOf(profile, ziweiProfiles)) return profile;
+	throw new Error('Unsupported profile. Use sanhe or feixing-sihua.');
+}
+
+function normalizeZiweiCalendar(calendar?: string): ZiweiCalendar {
+	const value = (calendar ?? 'solar').toLowerCase();
+	if (value === 'solar' || value === '公历' || value === '阳历') return 'solar';
+	if (value === 'lunar' || value === '农历' || value === '阴历') return 'lunar';
+	throw new Error('Unsupported calendar. Use solar or lunar.');
+}
+
+function normalizeZiweiLanguage(language?: string): ZiweiLanguage {
+	if (!language) return 'zh-CN';
+	if (isOneOf(language, ziweiLanguages)) return language;
+	throw new Error('Unsupported language. Use zh-CN, zh-TW, en-US, ja-JP, ko-KR, or vi-VN.');
+}
+
+function normalizeZiweiScope(scope: string): ZiweiScope {
+	if (isOneOf(scope, ziweiScopes)) return scope;
+	throw new Error('Unsupported scope. Use decadal, age, yearly, monthly, daily, or hourly.');
+}
+
+function toZiweiGender(gender: string): '男' | '女' {
+	const value = gender.trim().toLowerCase();
+	if (value === '男' || value === 'male' || value === 'm') return '男';
+	if (value === '女' || value === 'female' || value === 'f') return '女';
+	throw new Error('Invalid gender. Use 男/女 or male/female.');
+}
+
+function ziweiTimeIndex(dt: ReturnType<typeof parseDatetime>) {
+	if (!dt) throw new Error('Invalid format. Use YYYY-MM-DD HH:MM');
+	if (dt.hour === 0) return 0;
+	if (dt.hour === 23) return 12;
+	return Math.floor((dt.hour + 1) / 2);
+}
+
+function ziweiProfileConfig(profile: ZiweiProfile): ZiweiOption['config'] {
+	return {
+		algorithm: profile === 'feixing-sihua' ? 'zhongzhou' : 'default',
+		yearDivide: profile === 'feixing-sihua' ? 'exact' : 'normal',
+		horoscopeDivide: profile === 'feixing-sihua' ? 'exact' : 'normal',
+		dayDivide: profile === 'feixing-sihua' ? 'forward' : 'current',
+	};
+}
+
+function ziweiDateString(dt: NonNullable<ReturnType<typeof parseDatetime>>) {
+	return `${dt.year}-${pad(dt.month)}-${pad(dt.day)}`;
+}
+
+function starText(star: IFunctionalStar) {
+	return [
+		star.name,
+		star.brightness ? `(${star.brightness})` : undefined,
+		star.mutagen ? `[${star.mutagen}]` : undefined,
+	].filter(Boolean).join('');
+}
+
+function starListText(stars: IFunctionalStar[], empty = '-') {
+	return stars.length > 0 ? stars.map(starText).join('、') : empty;
+}
+
+function starNamesText(stars: IFunctionalStar[] | undefined, empty = '-') {
+	return stars && stars.length > 0 ? stars.map((star) => star.name).join('、') : empty;
+}
+
+function mutagenText(item: Pick<HoroscopeItem, 'mutagen'>) {
+	return item.mutagen.length > 0 ? item.mutagen.join('、') : '-';
+}
+
+function horoscopeStarsText(item: Pick<HoroscopeItem, 'stars'>, index: number) {
+	return starNamesText(item.stars?.[index]);
+}
+
+function horoscopeItemBranch(item: Pick<HoroscopeItem, 'heavenlyStem' | 'earthlyBranch'>) {
+	return `${item.heavenlyStem}${item.earthlyBranch}`;
+}
+
+function decadalText(palace: IFunctionalPalace) {
+	const range = palace.decadal?.range;
+	if (!range) return '-';
+	return `${range[0]}-${range[1]}岁 ${palace.decadal.heavenlyStem}${palace.decadal.earthlyBranch}`;
+}
+
+function agesText(palace: IFunctionalPalace) {
+	return palace.ages.length > 0 ? palace.ages.join('、') : '-';
+}
+
+function palaceFlags(palace: IFunctionalPalace) {
+	return [
+		palace.isBodyPalace ? '身宫' : undefined,
+		palace.isOriginalPalace ? '来因宫' : undefined,
+	].filter(Boolean).join('、') || '-';
+}
+
+function palaceLabel(astrolabe: IFunctionalAstrolabe, index: number) {
+	const palace = astrolabe.palaces[index];
+	if (!palace) return `第${index + 1}宫`;
+	return `${palace.name}(${palace.heavenlyStem}${palace.earthlyBranch})`;
+}
+
+function scopeItem(horoscope: IFunctionalHoroscope, scope: ZiweiScope) {
+	return horoscope[scope];
+}
+
+function ziweiFourTransforms(astrolabe: IFunctionalAstrolabe) {
+	return astrolabe.palaces.flatMap((palace) =>
+		palace.majorStars
+			.filter((star) => star.mutagen)
+			.map((star) => ({ palace: palace.name, star: star.name, transform: star.mutagen ?? '' })),
+	);
+}
+
+function formatZiweiSummary(
+	astrolabe: IFunctionalAstrolabe,
+	datetime: string,
+	calendar: ZiweiCalendar,
+	profile: ZiweiProfile,
+	timeIndex: number,
+) {
+	return joinSections([
+		[
+			`输入: ${datetime}`,
+			`历法: ${calendar === 'solar' ? '公历' : '农历'}`,
+			`流派: ${ziweiProfileLabels[profile]} (${profile})`,
+			`时辰索引: ${timeIndex}`,
+			`公历: ${astrolabe.solarDate}`,
+			`农历: ${astrolabe.lunarDate}`,
+			`干支: ${astrolabe.chineseDate}`,
+		].join('\n'),
+		mdTable(['命主', '身主', '五行局', '生肖', '星座', '命宫地支', '身宫地支'], [[
+			astrolabe.soul,
+			astrolabe.body,
+			astrolabe.fiveElementsClass,
+			astrolabe.zodiac,
+			astrolabe.sign,
+			astrolabe.earthlyBranchOfSoulPalace,
+			astrolabe.earthlyBranchOfBodyPalace,
+		]]),
+	]);
+}
+
+function formatZiweiPalacesTable(astrolabe: IFunctionalAstrolabe) {
+	return mdTable(
+		['宫位', '干支', '标记', '主星', '辅星', '杂耀', '长生/博士/将前/岁前', '大限', '小限年龄'],
+		astrolabe.palaces.map((palace) => [
+			palace.name,
+			`${palace.heavenlyStem}${palace.earthlyBranch}`,
+			palaceFlags(palace),
+			starListText(palace.majorStars),
+			starListText(palace.minorStars),
+			starListText(palace.adjectiveStars),
+			`${palace.changsheng12}/${palace.boshi12}/${palace.jiangqian12}/${palace.suiqian12}`,
+			decadalText(palace),
+			agesText(palace),
+		]),
+	);
+}
+
+function formatZiweiTransformsTable(astrolabe: IFunctionalAstrolabe) {
+	const transforms = ziweiFourTransforms(astrolabe);
+	if (transforms.length === 0) return '四化: 未见主星四化。';
+	return mdTable(
+		['宫位', '星曜', '四化'],
+		transforms.map((item) => [item.palace, item.star, item.transform]),
+	);
+}
+
+function formatZiweiHoroscopeOverview(chart: ReturnType<typeof buildZiweiChart>, horoscope: IFunctionalHoroscope) {
+	return mdTable(
+		['层级', '干支', '所在原盘宫', '四化', '流耀提示'],
+		ziweiScopes.map((scope) => {
+			const item = scopeItem(horoscope, scope);
+			return [
+				scope === 'age' ? `${ziweiScopeLabels[scope]}(${horoscope.age.nominalAge}虚岁)` : ziweiScopeLabels[scope],
+				horoscopeItemBranch(item),
+				palaceLabel(chart.astrolabe, item.index),
+				mutagenText(item),
+				item.stars ? `有流耀宫位 ${item.stars.filter((stars) => stars.length > 0).length}/12` : '-',
+			];
+		}),
+	);
+}
+
+function formatZiweiScopePalacesTable(
+	astrolabe: IFunctionalAstrolabe,
+	item: HoroscopeItem,
+) {
+	const headers = ['序', '运限宫位', '原盘宫位', '原盘干支', '原盘主星', '原盘辅星', '流耀'];
+	const rows = astrolabe.palaces.map((palace, index) => {
+		return [
+			index + 1,
+			item.palaceNames[index] ?? '-',
+			palace.name,
+			`${palace.heavenlyStem}${palace.earthlyBranch}`,
+			starListText(palace.majorStars),
+			starListText(palace.minorStars),
+			horoscopeStarsText(item, index),
+		];
+	});
+	return mdTable(headers, rows);
+}
+
+function formatZiweiScopeFocus(
+	horoscope: IFunctionalHoroscope,
+	scope: ZiweiScope,
+	focusPalace: string,
+) {
+	if (scope === 'age') {
+		const palace = horoscope.agePalace();
+		if (!palace) return '小限宫位: -';
+		return mdTable(['项目', '宫位', '干支', '主星', '辅星'], [[
+			'小限',
+			palace.name,
+			`${palace.heavenlyStem}${palace.earthlyBranch}`,
+			starListText(palace.majorStars),
+			starListText(palace.minorStars),
+		]]);
+	}
+
+	const runtimeScope = scope as ZiweiRuntimeScope;
+	const target = horoscope.palace(focusPalace as never, runtimeScope);
+	const surrounded = horoscope.surroundPalaces(focusPalace as never, runtimeScope);
+	if (!target || !surrounded) {
+		throw new Error(`Unknown focusPalace: ${focusPalace}`);
+	}
+	const rows = [
+		['本宫', target],
+		['对宫', surrounded.opposite],
+		['财帛位', surrounded.wealth],
+		['官禄位', surrounded.career],
+	].map(([label, palace]) => {
+		const item = palace as IFunctionalPalace | undefined;
+		return [
+			label,
+			item?.name ?? '-',
+			item ? `${item.heavenlyStem}${item.earthlyBranch}` : '-',
+			item ? starListText(item.majorStars) : '-',
+			item ? starListText(item.minorStars) : '-',
+		];
+	});
+	return mdTable(['关系', '原盘宫位', '干支', '主星', '辅星'], rows);
+}
+
+function buildZiweiChart(
+	datetime: string,
+	gender: string,
+	profileInput?: string,
+	calendarInput?: string,
+	isLeapMonth?: boolean,
+	languageInput?: string,
+) {
+	const dt = parseDatetime(datetime);
+	if (!dt) throw new Error('Invalid format. Use YYYY-MM-DD HH:MM');
+	const profile = normalizeZiweiProfile(profileInput);
+	const calendar = normalizeZiweiCalendar(calendarInput);
+	const language = normalizeZiweiLanguage(languageInput);
+	const option: ZiweiOption = {
+		type: calendar,
+		dateStr: ziweiDateString(dt),
+		timeIndex: ziweiTimeIndex(dt),
+		gender: toZiweiGender(gender),
+		fixLeap: true,
+		language,
+		config: ziweiProfileConfig(profile),
+		...(calendar === 'lunar' ? { isLeapMonth: isLeapMonth ?? false } : {}),
+	};
+
+	return {
+		profile,
+		calendar,
+		option,
+		astrolabe: astro.withOptions(option),
+	};
+}
+
+function buildZiweiHoroscope(
+	birthDatetime: string,
+	gender: string,
+	targetDatetime: string,
+	profileInput?: string,
+	calendarInput?: string,
+	isLeapMonth?: boolean,
+	languageInput?: string,
+) {
+	const target = parseDatetime(targetDatetime);
+	if (!target) throw new Error('Invalid targetDatetime format. Use YYYY-MM-DD HH:MM');
+	const chart = buildZiweiChart(birthDatetime, gender, profileInput, calendarInput, isLeapMonth, languageInput);
+	const targetTimeIndex = ziweiTimeIndex(target);
+	const horoscope = chart.astrolabe.horoscope(ziweiDateString(target), targetTimeIndex);
+	return {
+		...chart,
+		target,
+		targetDatetime,
+		targetTimeIndex,
+		horoscope,
+	};
 }
 
 // ===== BaZi Core Helpers =====
@@ -1112,6 +1450,113 @@ function registerFlowHourTool(server: McpServer) {
 	);
 }
 
+function registerZiweiChartTool(server: McpServer) {
+	server.registerTool(
+		'get_ziwei_chart',
+		{
+			title: '紫微斗数排盘',
+			description: '紫微斗数本命盘：输出命主身主、五行局、十二宫主辅杂曜、大限、小限年龄与生年四化。',
+			inputSchema: {
+				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
+				gender: z.string().describe('性别：男/女 或 male/female'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置：sanhe（三合）或 feixing-sihua（飞星四化）'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('输入日期历法：solar=公历，lunar=农历'),
+				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时是否为农历闰月'),
+				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
+			},
+		},
+		async ({ datetime, gender, profile, calendar, isLeapMonth, language }) => {
+			try {
+				const chart = buildZiweiChart(datetime, gender, profile, calendar, isLeapMonth, language);
+				return textResult(joinSections([
+					'紫微斗数排盘',
+					formatZiweiSummary(chart.astrolabe, datetime, chart.calendar, chart.profile, chart.option.timeIndex),
+					joinSections(['十二宫星曜', formatZiweiPalacesTable(chart.astrolabe)]),
+					joinSections(['生年四化', formatZiweiTransformsTable(chart.astrolabe)]),
+					'说明: 本命盘固定输出完整十二宫信息；需要流年/月/日/时用 get_ziwei_horoscope，总览后再用 get_ziwei_scope_detail 深入单层运限。',
+				]));
+			} catch (e) {
+				return errResult(`紫微斗数排盘错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+}
+
+function registerZiweiHoroscopeTool(server: McpServer) {
+	server.registerTool(
+		'get_ziwei_horoscope',
+		{
+			title: '紫微运限总览',
+			description: '紫微斗数运限：输入出生信息和目标时间，紧凑输出大限、小限、流年、流月、流日、流时的宫位、干支、四化和流耀数量提示。',
+			inputSchema: {
+				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
+				gender: z.string().describe('性别：男/女 或 male/female'),
+				targetDatetime: z.string().describe('目标日期时间 YYYY-MM-DD HH:MM，用于推大限/小限/流年/流月/流日/流时'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置：sanhe（三合）或 feixing-sihua（飞星四化）'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法：solar=公历，lunar=农历'),
+				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时出生日期是否为农历闰月'),
+				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
+			},
+		},
+		async ({ birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language }) => {
+			try {
+				const ctx = buildZiweiHoroscope(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
+				return textResult(joinSections([
+					'紫微运限总览',
+					`出生: ${birthDatetime} (${ctx.calendar === 'solar' ? '公历' : '农历'})\n目标: ${targetDatetime}\n目标公历: ${ctx.horoscope.solarDate}\n目标农历: ${ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[ctx.profile]} (${ctx.profile})\n目标时辰索引: ${ctx.targetTimeIndex}`,
+					formatZiweiHoroscopeOverview(ctx, ctx.horoscope),
+					'使用建议: 这个工具只给总览。若要展开某一层的十二宫映射和流耀，继续调用 get_ziwei_scope_detail，并指定 scope=decadal/yearly/monthly/daily/hourly/age。',
+				]));
+			} catch (e) {
+				return errResult(`紫微运限错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+}
+
+function registerZiweiScopeDetailTool(server: McpServer) {
+	server.registerTool(
+		'get_ziwei_scope_detail',
+		{
+			title: '紫微单层运限详盘',
+			description: '紫微斗数单层运限详盘：只展开一个层级的大限/小限/流年/流月/流日/流时，避免一次返回全部运限导致上下文过大。',
+			inputSchema: {
+				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
+				gender: z.string().describe('性别：男/女 或 male/female'),
+				targetDatetime: z.string().describe('目标日期时间 YYYY-MM-DD HH:MM'),
+				scope: z.enum(ziweiScopes).describe('要展开的层级：decadal/age/yearly/monthly/daily/hourly'),
+				focusPalace: z.string().optional().default('命宫').describe('重点宫位，默认命宫；仅 decadal/yearly/monthly/daily/hourly 用于三方四正'),
+				profile: z.enum(ziweiProfiles).optional().default('sanhe').describe('排盘配置：sanhe（三合）或 feixing-sihua（飞星四化）'),
+				calendar: z.enum(['solar', 'lunar']).optional().default('solar').describe('出生日期历法：solar=公历，lunar=农历'),
+				isLeapMonth: z.boolean().optional().default(false).describe('calendar=lunar 时出生日期是否为农历闰月'),
+				language: z.enum(ziweiLanguages).optional().default('zh-CN').describe('输出语言，默认 zh-CN'),
+			},
+		},
+		async ({ birthDatetime, gender, targetDatetime, scope, focusPalace, profile, calendar, isLeapMonth, language }) => {
+			try {
+				const ctx = buildZiweiHoroscope(birthDatetime, gender, targetDatetime, profile, calendar, isLeapMonth, language);
+				const normalizedScope = normalizeZiweiScope(scope);
+				const item = scopeItem(ctx.horoscope, normalizedScope);
+				return textResult(joinSections([
+					`${ziweiScopeLabels[normalizedScope]}详盘`,
+					`出生: ${birthDatetime}\n目标: ${targetDatetime}\n目标公历: ${ctx.horoscope.solarDate}\n目标农历: ${ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[ctx.profile]} (${ctx.profile})`,
+					mdTable(['层级', '干支', '所在原盘宫', '四化', '虚岁'], [[
+						ziweiScopeLabels[normalizedScope],
+						horoscopeItemBranch(item),
+						palaceLabel(ctx.astrolabe, item.index),
+						mutagenText(item),
+						normalizedScope === 'age' ? `${ctx.horoscope.age.nominalAge}虚岁` : '-',
+					]]),
+					joinSections([`${ziweiScopeLabels[normalizedScope]}十二宫映射`, formatZiweiScopePalacesTable(ctx.astrolabe, item)]),
+					joinSections([normalizedScope === 'age' ? '小限宫位' : `${focusPalace}三方四正`, formatZiweiScopeFocus(ctx.horoscope, normalizedScope, focusPalace)]),
+				]));
+			} catch (e) {
+				return errResult(`紫微单层运限错误: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		},
+	);
+}
+
 // ===== Server Creation =====
 
 function createServer() {
@@ -1127,6 +1572,9 @@ function createServer() {
 	registerFlowMonthTool(server);
 	registerFlowDayTool(server);
 	registerFlowHourTool(server);
+	registerZiweiChartTool(server);
+	registerZiweiHoroscopeTool(server);
+	registerZiweiScopeDetailTool(server);
 
 	return server;
 }
@@ -1142,12 +1590,15 @@ const allTools = [
 	{ name: 'get_bazi_flow_month', title: '流月排盘' },
 	{ name: 'get_bazi_flow_day', title: '流日排盘' },
 	{ name: 'get_bazi_flow_hour', title: '流时排盘' },
+	{ name: 'get_ziwei_chart', title: '紫微斗数排盘' },
+	{ name: 'get_ziwei_horoscope', title: '紫微运限总览' },
+	{ name: 'get_ziwei_scope_detail', title: '紫微单层运限详盘' },
 ];
 
 function serverInfoText() {
 	return joinSections([
 		'Lunar Calendar MCP Server',
-		'农历/公历转换、天干地支、八字命盘、大运小运流年流月流日流时、神煞、刑冲合害、五行统计',
+		'农历/公历转换、天干地支、八字命盘、大运小运流年流月流日流时、神煞、刑冲合害、五行统计、紫微斗数排盘与运限',
 		'MCP endpoint: /lunar',
 		mdTable(['Tool', 'Title'], allTools.map((tool) => [tool.name, tool.title])),
 	]);
