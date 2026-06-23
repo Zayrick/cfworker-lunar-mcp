@@ -8,6 +8,54 @@ import type { IFunctionalHoroscope } from 'iztro/lib/astro/FunctionalHoroscope';
 import type { IFunctionalPalace } from 'iztro/lib/astro/FunctionalPalace';
 import type { IFunctionalStar } from 'iztro/lib/star/FunctionalStar';
 import {
+	BA_ZHUAN,
+	BAI_HU,
+	CI_GUAN,
+	DE_XIU,
+	DIAO_KE,
+	FEI_REN,
+	FU_XING,
+	GOU_SHA,
+	GU_CHEN,
+	GU_LUAN,
+	GUA_SU,
+	GUO_YIN,
+	HONG_LUAN,
+	HONG_YAN,
+	HUA_GAI,
+	JIANG_XING,
+	JIAO_SHA,
+	JIE_SHA,
+	JIN_SHEN,
+	JIN_YU,
+	KUI_GANG,
+	LIU_XIA,
+	LU_SHEN,
+	PI_TOU,
+	SAN_QI,
+	SANG_MEN,
+	SHI_E_DA_BAI,
+	SI_FEI_RI,
+	TAI_JI_GUI_REN,
+	TAO_HUA,
+	TIAN_CHU,
+	TIAN_DE,
+	TIAN_DE_HE,
+	TIAN_XI,
+	TIAN_YI,
+	TIAN_YI_GUI_REN,
+	WANG_SHEN,
+	WEN_CHANG,
+	XUE_REN,
+	XUE_TANG,
+	YANG_REN,
+	YI_MA,
+	YIN_CHA_YANG_CUO,
+	YUE_DE,
+	YUE_DE_HE,
+	ZAI_SHA,
+} from 'taibu-core/data/shensha';
+import {
 	SolarTime,
 	SolarDay,
 	SolarTerm,
@@ -20,6 +68,7 @@ import {
 	EightChar,
 	HeavenStem,
 	EarthBranch,
+	HideHeavenStemType,
 	SixtyCycle,
 	DecadeFortune,
 	Fortune,
@@ -56,6 +105,10 @@ function toGender(g: string): Gender {
 	throw new Error('Invalid gender. Use 男/女 or male/female.');
 }
 
+function genderLabel(g: string) {
+	return toGender(g) === Gender.MAN ? '男' : '女';
+}
+
 function pad(n: number, len = 2) {
 	return String(n).padStart(len, '0');
 }
@@ -88,7 +141,7 @@ function joinSections(sections: Array<string | undefined | null | false>) {
 // ===== Ziwei Doushu Helpers =====
 
 const ziweiProfiles = ['sanhe', 'feixing-sihua'] as const;
-type ZiweiProfile = typeof ziweiProfiles[number];
+type ZiweiProfile = (typeof ziweiProfiles)[number];
 
 const ziweiProfileLabels: Record<ZiweiProfile, string> = {
 	sanhe: '三合',
@@ -96,12 +149,12 @@ const ziweiProfileLabels: Record<ZiweiProfile, string> = {
 };
 
 const ziweiLanguages = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'vi-VN'] as const;
-type ZiweiLanguage = typeof ziweiLanguages[number];
+type ZiweiLanguage = (typeof ziweiLanguages)[number];
 
 type ZiweiCalendar = 'solar' | 'lunar';
 
 const ziweiScopes = ['decadal', 'age', 'yearly', 'monthly', 'daily', 'hourly'] as const;
-type ZiweiScope = typeof ziweiScopes[number];
+type ZiweiScope = (typeof ziweiScopes)[number];
 type ZiweiRuntimeScope = Exclude<ZiweiScope, 'age'>;
 
 const ziweiScopeLabels: Record<ZiweiScope, string> = {
@@ -169,11 +222,9 @@ function ziweiDateString(dt: NonNullable<ReturnType<typeof parseDatetime>>) {
 }
 
 function starText(star: IFunctionalStar) {
-	return [
-		star.name,
-		star.brightness ? `(${star.brightness})` : undefined,
-		star.mutagen ? `[${star.mutagen}]` : undefined,
-	].filter(Boolean).join('');
+	return [star.name, star.brightness ? `(${star.brightness})` : undefined, star.mutagen ? `[${star.mutagen}]` : undefined]
+		.filter(Boolean)
+		.join('');
 }
 
 function starListText(stars: IFunctionalStar[], empty = '-') {
@@ -207,10 +258,7 @@ function agesText(palace: IFunctionalPalace) {
 }
 
 function palaceFlags(palace: IFunctionalPalace) {
-	return [
-		palace.isBodyPalace ? '身宫' : undefined,
-		palace.isOriginalPalace ? '来因宫' : undefined,
-	].filter(Boolean).join('、') || '-';
+	return [palace.isBodyPalace ? '身宫' : undefined, palace.isOriginalPalace ? '来因宫' : undefined].filter(Boolean).join('、') || '-';
 }
 
 function palaceLabel(astrolabe: IFunctionalAstrolabe, index: number) {
@@ -248,15 +296,20 @@ function formatZiweiSummary(
 			`农历: ${astrolabe.lunarDate}`,
 			`干支: ${astrolabe.chineseDate}`,
 		].join('\n'),
-		mdTable(['命主', '身主', '五行局', '生肖', '星座', '命宫地支', '身宫地支'], [[
-			astrolabe.soul,
-			astrolabe.body,
-			astrolabe.fiveElementsClass,
-			astrolabe.zodiac,
-			astrolabe.sign,
-			astrolabe.earthlyBranchOfSoulPalace,
-			astrolabe.earthlyBranchOfBodyPalace,
-		]]),
+		mdTable(
+			['命主', '身主', '五行局', '生肖', '星座', '命宫地支', '身宫地支'],
+			[
+				[
+					astrolabe.soul,
+					astrolabe.body,
+					astrolabe.fiveElementsClass,
+					astrolabe.zodiac,
+					astrolabe.sign,
+					astrolabe.earthlyBranchOfSoulPalace,
+					astrolabe.earthlyBranchOfBodyPalace,
+				],
+			],
+		),
 	]);
 }
 
@@ -304,10 +357,7 @@ function formatZiweiHoroscopeOverview(chart: ReturnType<typeof buildZiweiChart>,
 	);
 }
 
-function formatZiweiScopePalacesTable(
-	astrolabe: IFunctionalAstrolabe,
-	item: HoroscopeItem,
-) {
+function formatZiweiScopePalacesTable(astrolabe: IFunctionalAstrolabe, item: HoroscopeItem) {
 	const headers = ['序', '运限宫位', '原盘宫位', '原盘干支', '原盘主星', '原盘辅星', '流耀'];
 	const rows = astrolabe.palaces.map((palace, index) => {
 		return [
@@ -323,21 +373,22 @@ function formatZiweiScopePalacesTable(
 	return mdTable(headers, rows);
 }
 
-function formatZiweiScopeFocus(
-	horoscope: IFunctionalHoroscope,
-	scope: ZiweiScope,
-	focusPalace: string,
-) {
+function formatZiweiScopeFocus(horoscope: IFunctionalHoroscope, scope: ZiweiScope, focusPalace: string) {
 	if (scope === 'age') {
 		const palace = horoscope.agePalace();
 		if (!palace) return '小限宫位: -';
-		return mdTable(['项目', '宫位', '干支', '主星', '辅星'], [[
-			'小限',
-			palace.name,
-			`${palace.heavenlyStem}${palace.earthlyBranch}`,
-			starListText(palace.majorStars),
-			starListText(palace.minorStars),
-		]]);
+		return mdTable(
+			['项目', '宫位', '干支', '主星', '辅星'],
+			[
+				[
+					'小限',
+					palace.name,
+					`${palace.heavenlyStem}${palace.earthlyBranch}`,
+					starListText(palace.majorStars),
+					starListText(palace.minorStars),
+				],
+			],
+		);
 	}
 
 	const runtimeScope = scope as ZiweiRuntimeScope;
@@ -447,22 +498,43 @@ function buildBaziContext(datetime: string) {
 	return { dt, solarTime, solarDay, lunarHour, lunarDay, eightChar, dayMaster };
 }
 
+type HiddenQiType = '本气' | '中气' | '余气';
+
+function hiddenStemQiType(type: HideHeavenStemType): HiddenQiType {
+	switch (type) {
+		case HideHeavenStemType.MAIN:
+			return '本气';
+		case HideHeavenStemType.MIDDLE:
+			return '中气';
+		case HideHeavenStemType.RESIDUAL:
+			return '余气';
+	}
+}
+
+function hiddenStemWeight(qiType: HiddenQiType) {
+	if (qiType === '本气') return 0.6;
+	if (qiType === '中气') return 0.3;
+	return 0.1;
+}
+
 /** Build detailed info for one pillar */
-function pillarDetail(pillar: SixtyCycle, dayMaster: HeavenStem, isDayPillar: boolean) {
+function pillarDetail(pillar: SixtyCycle, dayMaster: HeavenStem, isDayPillar: boolean, shenSha: string[] = []) {
 	const hs = pillar.getHeavenStem();
 	const eb = pillar.getEarthBranch();
 
 	// 十神
 	const tenGod = isDayPillar ? '日主' : dayMaster.getTenStar(hs).getName();
 
-	// 藏干 + each hidden stem's 十神
-	const hiddenStems: { stem: string; tenGod: string }[] = [];
-	const main = eb.getHideHeavenStemMain();
-	hiddenStems.push({ stem: main.getName(), tenGod: dayMaster.getTenStar(main).getName() });
-	const mid = eb.getHideHeavenStemMiddle();
-	if (mid) hiddenStems.push({ stem: mid.getName(), tenGod: dayMaster.getTenStar(mid).getName() });
-	const res = eb.getHideHeavenStemResidual();
-	if (res) hiddenStems.push({ stem: res.getName(), tenGod: dayMaster.getTenStar(res).getName() });
+	const hiddenStems = eb.getHideHeavenStems().map((hiddenStem) => {
+		const stem = hiddenStem.getHeavenStem();
+		const qiType = hiddenStemQiType(hiddenStem.getType());
+		return {
+			stem: stem.getName(),
+			qiType,
+			weight: hiddenStemWeight(qiType),
+			tenGod: dayMaster.getTenStar(stem).getName(),
+		};
+	});
 
 	// 星运: terrain from day master's perspective
 	const terrain = dayMaster.getTerrain(eb).getName();
@@ -487,6 +559,7 @@ function pillarDetail(pillar: SixtyCycle, dayMaster: HeavenStem, isDayPillar: bo
 		selfSitting,
 		kongwang,
 		nayin,
+		shenSha,
 	};
 }
 
@@ -561,7 +634,7 @@ type PillarInfo = ReturnType<typeof pillarDetail>;
 type CycleWithNayin = ReturnType<typeof sixtyCycleWithNayin>;
 
 function hiddenStemsText(pillar: PillarInfo) {
-	return pillar.hiddenStems.map(({ stem, tenGod }) => `${stem}(${tenGod})`).join(' ');
+	return pillar.hiddenStems.map(({ stem, qiType, tenGod }) => `${stem}/${qiType}/${tenGod}`).join('、');
 }
 
 function cycleNayinText(item: CycleWithNayin) {
@@ -581,8 +654,7 @@ function solarRangeText(start: SolarTime, end: SolarTime) {
 }
 
 function sixtyCycleMonthStartTime(month: SixtyCycleMonth) {
-	return SolarTerm
-		.fromIndex(month.getSixtyCycleYear().getYear(), 3 + month.getIndexInYear() * 2)
+	return SolarTerm.fromIndex(month.getSixtyCycleYear().getYear(), 3 + month.getIndexInYear() * 2)
 		.getJulianDay()
 		.getSolarTime();
 }
@@ -610,9 +682,7 @@ function sixtyCycleDaySolarRange(day: SixtyCycleDay) {
 function startOfSixtyCycleHour(solarTime: SolarTime) {
 	const hour = solarTime.getHour();
 	if (hour === 0) {
-		return SolarTime
-			.fromYmdHms(solarTime.getYear(), solarTime.getMonth(), solarTime.getDay(), 0, 0, 0)
-			.next(-3600);
+		return SolarTime.fromYmdHms(solarTime.getYear(), solarTime.getMonth(), solarTime.getDay(), 0, 0, 0).next(-3600);
 	}
 	const startHour = hour === 23 ? 23 : Math.floor((hour + 1) / 2) * 2 - 1;
 	return SolarTime.fromYmdHms(solarTime.getYear(), solarTime.getMonth(), solarTime.getDay(), startHour, 0, 0);
@@ -626,32 +696,83 @@ function sixtyCycleHourSolarRange(hour: SixtyCycleHour) {
 function formatGanzhiResult(title: string, datetime: string, solar: string, lunar: string, eightChar: EightChar) {
 	return joinSections([
 		`${title}: ${datetime}\n公历: ${solar}\n农历: ${lunar}`,
-		mdTable(['年柱', '月柱', '日柱', '时柱', '完整四柱'], [
+		mdTable(
+			['年柱', '月柱', '日柱', '时柱', '完整四柱'],
 			[
-				eightChar.getYear().getName(),
-				eightChar.getMonth().getName(),
-				eightChar.getDay().getName(),
-				eightChar.getHour().getName(),
-				eightChar.toString(),
+				[
+					eightChar.getYear().getName(),
+					eightChar.getMonth().getName(),
+					eightChar.getDay().getName(),
+					eightChar.getHour().getName(),
+					eightChar.toString(),
+				],
 			],
-		]),
+		),
 	]);
 }
 
 function formatPillarsTable(fourPillars: Record<'year' | 'month' | 'day' | 'hour', PillarInfo>) {
 	return mdTable(
-		['柱', '干支', '十神', '天干', '地支', '藏干', '星运', '自坐', '空亡', '纳音'],
+		['柱', '干支', '十神', '天干', '地支', '藏干', '星运', '自坐', '空亡', '纳音', '神煞'],
 		[
-			['年柱', fourPillars.year.pillar, fourPillars.year.tenGod, fourPillars.year.heavenStem, fourPillars.year.earthBranch, hiddenStemsText(fourPillars.year), fourPillars.year.terrain, fourPillars.year.selfSitting, fourPillars.year.kongwang.join(''), fourPillars.year.nayin],
-			['月柱', fourPillars.month.pillar, fourPillars.month.tenGod, fourPillars.month.heavenStem, fourPillars.month.earthBranch, hiddenStemsText(fourPillars.month), fourPillars.month.terrain, fourPillars.month.selfSitting, fourPillars.month.kongwang.join(''), fourPillars.month.nayin],
-			['日柱', fourPillars.day.pillar, fourPillars.day.tenGod, fourPillars.day.heavenStem, fourPillars.day.earthBranch, hiddenStemsText(fourPillars.day), fourPillars.day.terrain, fourPillars.day.selfSitting, fourPillars.day.kongwang.join(''), fourPillars.day.nayin],
-			['时柱', fourPillars.hour.pillar, fourPillars.hour.tenGod, fourPillars.hour.heavenStem, fourPillars.hour.earthBranch, hiddenStemsText(fourPillars.hour), fourPillars.hour.terrain, fourPillars.hour.selfSitting, fourPillars.hour.kongwang.join(''), fourPillars.hour.nayin],
+			[
+				'年柱',
+				fourPillars.year.pillar,
+				fourPillars.year.tenGod,
+				fourPillars.year.heavenStem,
+				fourPillars.year.earthBranch,
+				hiddenStemsText(fourPillars.year),
+				fourPillars.year.terrain,
+				fourPillars.year.selfSitting,
+				fourPillars.year.kongwang.join(''),
+				fourPillars.year.nayin,
+				shenshaListText(fourPillars.year.shenSha),
+			],
+			[
+				'月柱',
+				fourPillars.month.pillar,
+				fourPillars.month.tenGod,
+				fourPillars.month.heavenStem,
+				fourPillars.month.earthBranch,
+				hiddenStemsText(fourPillars.month),
+				fourPillars.month.terrain,
+				fourPillars.month.selfSitting,
+				fourPillars.month.kongwang.join(''),
+				fourPillars.month.nayin,
+				shenshaListText(fourPillars.month.shenSha),
+			],
+			[
+				'日柱',
+				fourPillars.day.pillar,
+				fourPillars.day.tenGod,
+				fourPillars.day.heavenStem,
+				fourPillars.day.earthBranch,
+				hiddenStemsText(fourPillars.day),
+				fourPillars.day.terrain,
+				fourPillars.day.selfSitting,
+				fourPillars.day.kongwang.join(''),
+				fourPillars.day.nayin,
+				shenshaListText(fourPillars.day.shenSha),
+			],
+			[
+				'时柱',
+				fourPillars.hour.pillar,
+				fourPillars.hour.tenGod,
+				fourPillars.hour.heavenStem,
+				fourPillars.hour.earthBranch,
+				hiddenStemsText(fourPillars.hour),
+				fourPillars.hour.terrain,
+				fourPillars.hour.selfSitting,
+				fourPillars.hour.kongwang.join(''),
+				fourPillars.hour.nayin,
+				shenshaListText(fourPillars.hour.shenSha),
+			],
 		],
 	);
 }
 
 const pillarKeys = ['year', 'month', 'day', 'hour'] as const;
-type PillarKey = typeof pillarKeys[number];
+type PillarKey = (typeof pillarKeys)[number];
 
 const pillarLabels: Record<PillarKey, string> = {
 	year: '年柱',
@@ -673,229 +794,300 @@ function formatCycleLabel(label: string, cycle: SixtyCycle) {
 	return `${label}${cycle.getName()}`;
 }
 
-type TargetToken = { type: 'stem' | 'branch'; name: string };
+type ShenshaPosition = PillarKey;
 
-interface ShenshaRow {
-	name: string;
-	basis: string;
-	target: string;
-	hits: string[];
-}
-
-const stemBranchShenshaRules: Array<{
-	name: string;
-	basis: Array<'yearStem' | 'dayStem'>;
-	targets: Record<string, string[]>;
-}> = [
-	{
-		name: '天乙贵人',
-		basis: ['yearStem', 'dayStem'],
-		targets: {
-			甲: ['丑', '未'],
-			戊: ['丑', '未'],
-			庚: ['丑', '未'],
-			乙: ['子', '申'],
-			己: ['子', '申'],
-			丙: ['亥', '酉'],
-			丁: ['亥', '酉'],
-			壬: ['卯', '巳'],
-			癸: ['卯', '巳'],
-			辛: ['寅', '午'],
-		},
-	},
-	{
-		name: '文昌贵人',
-		basis: ['yearStem', 'dayStem'],
-		targets: {
-			甲: ['巳'],
-			乙: ['午'],
-			丙: ['申'],
-			丁: ['酉'],
-			戊: ['申'],
-			己: ['酉'],
-			庚: ['亥'],
-			辛: ['子'],
-			壬: ['寅'],
-			癸: ['卯'],
-		},
-	},
-	{
-		name: '羊刃',
-		basis: ['dayStem'],
-		targets: {
-			甲: ['卯'],
-			乙: ['寅'],
-			丙: ['午'],
-			丁: ['巳'],
-			戊: ['午'],
-			己: ['巳'],
-			庚: ['酉'],
-			辛: ['申'],
-			壬: ['子'],
-			癸: ['亥'],
-		},
-	},
-	{
-		name: '禄神',
-		basis: ['dayStem'],
-		targets: {
-			甲: ['寅'],
-			乙: ['卯'],
-			丙: ['巳'],
-			丁: ['午'],
-			戊: ['巳'],
-			己: ['午'],
-			庚: ['申'],
-			辛: ['酉'],
-			壬: ['亥'],
-			癸: ['子'],
-		},
-	},
-];
-
-const branchGroupShenshaRules: Array<{
-	name: string;
-	basis: Array<'yearBranch' | 'dayBranch'>;
-	targetsByGroup: Record<string, string>;
-}> = [
-	{ name: '桃花/咸池', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '酉', 寅午戌: '卯', 巳酉丑: '午', 亥卯未: '子' } },
-	{ name: '驿马', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '寅', 寅午戌: '申', 巳酉丑: '亥', 亥卯未: '巳' } },
-	{ name: '华盖', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '辰', 寅午戌: '戌', 巳酉丑: '丑', 亥卯未: '未' } },
-	{ name: '劫煞', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '巳', 寅午戌: '亥', 巳酉丑: '寅', 亥卯未: '申' } },
-	{ name: '将星', basis: ['yearBranch', 'dayBranch'], targetsByGroup: { 申子辰: '子', 寅午戌: '午', 巳酉丑: '酉', 亥卯未: '卯' } },
-];
-
-const monthBranchShenshaRules: Array<{
-	name: string;
-	targets: Record<string, TargetToken[]>;
-}> = [
-	{
-		name: '天德贵人',
-		targets: {
-			寅: [{ type: 'stem', name: '丁' }],
-			卯: [{ type: 'branch', name: '申' }],
-			辰: [{ type: 'stem', name: '壬' }],
-			巳: [{ type: 'stem', name: '辛' }],
-			午: [{ type: 'branch', name: '亥' }],
-			未: [{ type: 'stem', name: '甲' }],
-			申: [{ type: 'stem', name: '癸' }],
-			酉: [{ type: 'branch', name: '寅' }],
-			戌: [{ type: 'stem', name: '丙' }],
-			亥: [{ type: 'stem', name: '乙' }],
-			子: [{ type: 'branch', name: '巳' }],
-			丑: [{ type: 'stem', name: '庚' }],
-		},
-	},
-	{
-		name: '月德贵人',
-		targets: {
-			寅: [{ type: 'stem', name: '丙' }],
-			午: [{ type: 'stem', name: '丙' }],
-			戌: [{ type: 'stem', name: '丙' }],
-			申: [{ type: 'stem', name: '壬' }],
-			子: [{ type: 'stem', name: '壬' }],
-			辰: [{ type: 'stem', name: '壬' }],
-			亥: [{ type: 'stem', name: '甲' }],
-			卯: [{ type: 'stem', name: '甲' }],
-			未: [{ type: 'stem', name: '甲' }],
-			巳: [{ type: 'stem', name: '庚' }],
-			酉: [{ type: 'stem', name: '庚' }],
-			丑: [{ type: 'stem', name: '庚' }],
-		},
-	},
-];
-
-function groupTarget(originBranch: string, targetsByGroup: Record<string, string>) {
-	const group = Object.keys(targetsByGroup).find((item) => item.includes(originBranch));
-	if (!group) return undefined;
-	return targetsByGroup[group];
-}
-
-function targetText(targets: TargetToken[]) {
-	const stems = targets.filter((target) => target.type === 'stem').map((target) => target.name);
-	const branches = targets.filter((target) => target.type === 'branch').map((target) => target.name);
-	return [
-		stems.length > 0 ? `干:${stems.join('/')}` : undefined,
-		branches.length > 0 ? `支:${branches.join('/')}` : undefined,
-	].filter(Boolean).join(' ');
-}
-
-function matchTargets(pillars: Record<PillarKey, SixtyCycle>, targets: TargetToken[]) {
-	const hits: string[] = [];
-	for (const key of pillarKeys) {
-		const cycle = pillars[key];
-		const stemName = cycle.getHeavenStem().getName();
-		const branchName = cycle.getEarthBranch().getName();
-		const parts: string[] = [];
-		for (const target of targets) {
-			if (target.type === 'stem' && stemName === target.name) parts.push(`干${target.name}`);
-			if (target.type === 'branch' && branchName === target.name) parts.push(`支${target.name}`);
-		}
-		if (parts.length > 0) hits.push(`${formatCycleLabel(pillarLabels[key], cycle)}(${parts.join('/')})`);
-	}
-	return hits;
-}
-
-function calculateShensha(eightChar: EightChar) {
-	const pillars = getPillarCycles(eightChar);
-	const rows: ShenshaRow[] = [];
-	const basisValues = {
-		yearStem: { label: '年干', value: eightChar.getYear().getHeavenStem().getName() },
-		dayStem: { label: '日干', value: eightChar.getDay().getHeavenStem().getName() },
-		yearBranch: { label: '年支', value: eightChar.getYear().getEarthBranch().getName() },
-		dayBranch: { label: '日支', value: eightChar.getDay().getEarthBranch().getName() },
+interface BaziShenshaContext {
+	yearStem: string;
+	yearBranch: string;
+	monthStem: string;
+	monthBranch: string;
+	dayStem: string;
+	dayBranch: string;
+	hourStem: string;
+	hourBranch: string;
+	kongWang: {
+		xun: string;
+		kongZhi: [string, string];
 	};
-
-	for (const rule of stemBranchShenshaRules) {
-		for (const basis of rule.basis) {
-			const basisValue = basisValues[basis];
-			const targets = (rule.targets[basisValue.value] ?? []).map((name) => ({ type: 'branch' as const, name }));
-			rows.push({
-				name: rule.name,
-				basis: `${basisValue.label}${basisValue.value}`,
-				target: targetText(targets),
-				hits: matchTargets(pillars, targets),
-			});
-		}
-	}
-
-	for (const rule of branchGroupShenshaRules) {
-		for (const basis of rule.basis) {
-			const basisValue = basisValues[basis];
-			const target = groupTarget(basisValue.value, rule.targetsByGroup);
-			const targets = target ? [{ type: 'branch' as const, name: target }] : [];
-			rows.push({
-				name: rule.name,
-				basis: `${basisValue.label}${basisValue.value}`,
-				target: targetText(targets),
-				hits: matchTargets(pillars, targets),
-			});
-		}
-	}
-
-	const monthBranch = eightChar.getMonth().getEarthBranch().getName();
-	for (const rule of monthBranchShenshaRules) {
-		const targets = rule.targets[monthBranch] ?? [];
-		rows.push({
-			name: rule.name,
-			basis: `月支${monthBranch}`,
-			target: targetText(targets),
-			hits: matchTargets(pillars, targets),
-		});
-	}
-
-	return rows;
+	yearNaYinElement?: string;
 }
 
-function formatShenshaTable(eightChar: EightChar, onlyHits = false) {
-	const rows = calculateShensha(eightChar)
-		.filter((row) => !onlyHits || row.hits.length > 0)
-		.map((row) => [row.name, row.basis, row.target, row.hits.length > 0 ? row.hits.join('；') : '-']);
+function addUnique(target: string[], value: string | undefined) {
+	if (value && !target.includes(value)) target.push(value);
+}
+
+function matchValue(values: string[] | readonly string[] | undefined, targetBranch: string, label: string, bag: string[]) {
+	if (values?.includes(targetBranch)) addUnique(bag, label);
+}
+
+function matchMapValue(map: Record<string, string>, key: string, targetBranch: string, label: string, bag: string[]) {
+	if (map[key] === targetBranch) addUnique(bag, label);
+}
+
+function checkDayPillarShensha(dayStem: string, dayBranch: string, monthBranch: string, names: string[], includeFull = false) {
+	const dayPillar = `${dayStem}${dayBranch}`;
+
+	if (KUI_GANG.includes(dayPillar)) addUnique(names, '魁罡');
+	if (YIN_CHA_YANG_CUO.includes(dayPillar)) addUnique(names, '阴差阳错');
+	if (SHI_E_DA_BAI.includes(dayPillar)) addUnique(names, '十恶大败');
+
+	if (!includeFull) return;
+	if (BA_ZHUAN.includes(dayPillar)) addUnique(names, '八专');
+	if (JIN_SHEN.includes(dayPillar)) addUnique(names, '金神');
+	if (GU_LUAN.includes(dayPillar)) addUnique(names, '孤鸾煞');
+	if (SI_FEI_RI[monthBranch]?.includes(dayPillar)) addUnique(names, '四废');
+}
+
+function naYinElement(nayin: string) {
+	const last = nayin.charAt(nayin.length - 1);
+	return ['金', '木', '水', '火', '土'].includes(last) ? last : undefined;
+}
+
+function buildShenshaContext(eightChar: EightChar): BaziShenshaContext {
+	const dayExtras = eightChar.getDay().getExtraEarthBranches();
+	return {
+		yearStem: eightChar.getYear().getHeavenStem().getName(),
+		yearBranch: eightChar.getYear().getEarthBranch().getName(),
+		monthStem: eightChar.getMonth().getHeavenStem().getName(),
+		monthBranch: eightChar.getMonth().getEarthBranch().getName(),
+		dayStem: eightChar.getDay().getHeavenStem().getName(),
+		dayBranch: eightChar.getDay().getEarthBranch().getName(),
+		hourStem: eightChar.getHour().getHeavenStem().getName(),
+		hourBranch: eightChar.getHour().getEarthBranch().getName(),
+		kongWang: {
+			xun: eightChar.getDay().getTen().getName(),
+			kongZhi: [dayExtras[0].getName(), dayExtras[1].getName()],
+		},
+		yearNaYinElement: naYinElement(eightChar.getYear().getSound().getName()),
+	};
+}
+
+function calculateBranchShensha(context: BaziShenshaContext, targetBranch: string, positionHint?: ShenshaPosition) {
+	const names: string[] = [];
+
+	matchValue(TIAN_YI_GUI_REN[context.dayStem], targetBranch, '天乙贵人', names);
+	matchValue(TAI_JI_GUI_REN[context.dayStem], targetBranch, '太极贵人', names);
+	matchValue(TAI_JI_GUI_REN[context.yearStem], targetBranch, '太极贵人', names);
+	matchMapValue(LU_SHEN, context.dayStem, targetBranch, '禄神', names);
+	matchMapValue(YANG_REN, context.dayStem, targetBranch, '羊刃', names);
+	matchMapValue(WEN_CHANG, context.dayStem, targetBranch, '文昌', names);
+	matchMapValue(TIAN_CHU, context.dayStem, targetBranch, '天厨', names);
+	matchMapValue(GUO_YIN, context.dayStem, targetBranch, '国印贵人', names);
+	matchMapValue(FU_XING, context.dayStem, targetBranch, '福星贵人', names);
+	matchMapValue(LIU_XIA, context.dayStem, targetBranch, '流霞', names);
+	matchMapValue(HONG_YAN, context.dayStem, targetBranch, '红艳煞', names);
+	matchMapValue(FEI_REN, context.dayStem, targetBranch, '飞刃', names);
+	matchMapValue(CI_GUAN, context.dayStem, targetBranch, '词馆', names);
+
+	for (const basisBranch of [context.dayBranch, context.yearBranch]) {
+		matchMapValue(YI_MA, basisBranch, targetBranch, '驿马', names);
+		matchMapValue(TAO_HUA, basisBranch, targetBranch, '桃花', names);
+		matchMapValue(HUA_GAI, basisBranch, targetBranch, '华盖', names);
+		matchMapValue(JIANG_XING, basisBranch, targetBranch, '将星', names);
+		matchMapValue(JIE_SHA, basisBranch, targetBranch, '劫煞', names);
+		matchMapValue(WANG_SHEN, basisBranch, targetBranch, '亡神', names);
+		matchMapValue(ZAI_SHA, basisBranch, targetBranch, '灾煞', names);
+	}
+
+	if (context.yearNaYinElement) matchMapValue(XUE_TANG, context.yearNaYinElement, targetBranch, '学堂', names);
+	matchMapValue(HONG_LUAN, context.yearBranch, targetBranch, '红鸾', names);
+	matchMapValue(TIAN_XI, context.yearBranch, targetBranch, '天喜', names);
+	matchMapValue(DIAO_KE, context.yearBranch, targetBranch, '吊客', names);
+	matchMapValue(SANG_MEN, context.yearBranch, targetBranch, '丧门', names);
+	matchMapValue(PI_TOU, context.yearBranch, targetBranch, '披头', names);
+	matchMapValue(GOU_SHA, context.yearBranch, targetBranch, '勾煞', names);
+	matchMapValue(JIAO_SHA, context.yearBranch, targetBranch, '绞煞', names);
+
+	matchMapValue(TIAN_YI, context.monthBranch, targetBranch, '天医', names);
+	matchMapValue(BAI_HU, context.monthBranch, targetBranch, '白虎', names);
+	matchMapValue(XUE_REN, context.dayBranch, targetBranch, '血刃', names);
+
+	if (GU_CHEN[context.yearBranch] === targetBranch) addUnique(names, '孤辰');
+	if (GUA_SU[context.yearBranch] === targetBranch) addUnique(names, '寡宿');
+	if (context.kongWang.kongZhi.includes(targetBranch)) addUnique(names, '空亡');
+
+	if (positionHint) {
+		const allBranches = [context.yearBranch, context.monthBranch, context.dayBranch, context.hourBranch];
+		if ((targetBranch === '戌' && allBranches.includes('亥')) || (targetBranch === '亥' && allBranches.includes('戌')))
+			addUnique(names, '天罗');
+		if ((targetBranch === '辰' && allBranches.includes('巳')) || (targetBranch === '巳' && allBranches.includes('辰')))
+			addUnique(names, '地网');
+	}
+
+	if (positionHint === 'day') checkDayPillarShensha(context.dayStem, context.dayBranch, context.monthBranch, names, true);
+
+	if (positionHint) {
+		const stems = [context.yearStem, context.monthStem, context.dayStem, context.hourStem];
+		const positions: ShenshaPosition[] = ['year', 'month', 'day', 'hour'];
+		for (const [qiName, qiStems] of Object.entries(SAN_QI)) {
+			for (let index = 0; index <= stems.length - 3; index++) {
+				if (
+					stems[index] === qiStems[0] &&
+					stems[index + 1] === qiStems[1] &&
+					stems[index + 2] === qiStems[2] &&
+					[positions[index], positions[index + 1], positions[index + 2]].includes(positionHint)
+				) {
+					addUnique(names, qiName);
+					break;
+				}
+			}
+		}
+	} else {
+		checkDayPillarShensha(context.dayStem, context.dayBranch, context.monthBranch, names);
+	}
+
+	return names;
+}
+
+function addStemOrBranchShensha(names: string[], label: string, target: string | undefined, stem: string, branch: string) {
+	if (target && (target === stem || target === branch)) addUnique(names, label);
+}
+
+function shenshaPositionStem(context: BaziShenshaContext, position: ShenshaPosition) {
+	if (position === 'year') return context.yearStem;
+	if (position === 'month') return context.monthStem;
+	if (position === 'day') return context.dayStem;
+	return context.hourStem;
+}
+
+function shenshaPositionBranch(context: BaziShenshaContext, position: ShenshaPosition) {
+	if (position === 'year') return context.yearBranch;
+	if (position === 'month') return context.monthBranch;
+	if (position === 'day') return context.dayBranch;
+	return context.hourBranch;
+}
+
+function addBaziPillarSpecificShensha(context: BaziShenshaContext, position: ShenshaPosition, names: string[]) {
+	const stem = shenshaPositionStem(context, position);
+	const branch = shenshaPositionBranch(context, position);
+
+	addStemOrBranchShensha(names, '金舆', JIN_YU[context.dayStem], stem, branch);
+	addStemOrBranchShensha(names, '月德贵人', YUE_DE[context.monthBranch], stem, branch);
+	addStemOrBranchShensha(names, '天德贵人', TIAN_DE[context.monthBranch], stem, branch);
+	if (DE_XIU[context.monthBranch]?.includes(stem)) addUnique(names, '德秀贵人');
+	addStemOrBranchShensha(names, '天德合', TIAN_DE_HE[context.monthBranch], stem, branch);
+	addStemOrBranchShensha(names, '月德合', YUE_DE_HE[context.monthBranch], stem, branch);
+}
+
+function calculatePillarShensha(eightChar: EightChar): Record<PillarKey, string[]> {
+	const context = buildShenshaContext(eightChar);
+	return Object.fromEntries(
+		pillarKeys.map((key) => {
+			const branch = shenshaPositionBranch(context, key);
+			const names = calculateBranchShensha(context, branch, key);
+			addBaziPillarSpecificShensha(context, key, names);
+			return [key, names];
+		}),
+	) as Record<PillarKey, string[]>;
+}
+
+function shenshaListText(names: string[]) {
+	return names.length > 0 ? names.join('、') : '-';
+}
+
+function formatPillarKongWangText(pillar: SixtyCycle) {
+	return `${pillar.getTen().getName()}旬 ${pillar
+		.getExtraEarthBranches()
+		.map((branch) => branch.getName())
+		.join('、')}空`;
+}
+
+function calculateTaiSui(flowBranch: string, yearBranch: string) {
+	const result: string[] = [];
+	if (flowBranch === yearBranch) result.push('值太岁');
+	if (branchOpposites[flowBranch] === yearBranch) result.push('冲太岁');
+	if (branchCombines[flowBranch] === yearBranch) result.push('合太岁');
+	if (taiSuiPunishmentGroups.some((branches) => branches.includes(flowBranch) && branches.includes(yearBranch))) result.push('刑太岁');
+	if (branchHarms[flowBranch] === yearBranch) result.push('害太岁');
+	if (branchBreaks[flowBranch] === yearBranch) result.push('破太岁');
+	return result;
+}
+
+function calculateShenshaRows(eightChar: EightChar) {
+	const pillars = getPillarCycles(eightChar);
+	const shensha = calculatePillarShensha(eightChar);
+	return pillarKeys.flatMap((key) =>
+		shensha[key].map((name) => ({
+			name,
+			position: pillarLabels[key],
+			pillar: pillars[key].getName(),
+		})),
+	);
+}
+
+function formatShenshaTable(eightChar: EightChar, _onlyHits = true) {
+	const rows = calculateShenshaRows(eightChar).map((row) => [row.name, row.position, row.pillar]);
 	if (rows.length === 0) return '命中神煞: 无';
-	return mdTable(['神煞', '起法', '目标', '命中位置'], rows);
+	return mdTable(['神煞', '命中位置', '干支'], rows);
 }
 
 const branchOrder = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+
+const branchOpposites: Record<string, string> = {
+	子: '午',
+	丑: '未',
+	寅: '申',
+	卯: '酉',
+	辰: '戌',
+	巳: '亥',
+	午: '子',
+	未: '丑',
+	申: '寅',
+	酉: '卯',
+	戌: '辰',
+	亥: '巳',
+};
+
+const branchCombines: Record<string, string> = {
+	子: '丑',
+	丑: '子',
+	寅: '亥',
+	亥: '寅',
+	卯: '戌',
+	戌: '卯',
+	辰: '酉',
+	酉: '辰',
+	巳: '申',
+	申: '巳',
+	午: '未',
+	未: '午',
+};
+
+const branchHarms: Record<string, string> = {
+	子: '未',
+	丑: '午',
+	寅: '巳',
+	卯: '辰',
+	辰: '卯',
+	巳: '寅',
+	午: '丑',
+	未: '子',
+	申: '亥',
+	酉: '戌',
+	戌: '酉',
+	亥: '申',
+};
+
+const branchBreaks: Record<string, string> = {
+	子: '酉',
+	酉: '子',
+	丑: '辰',
+	辰: '丑',
+	寅: '亥',
+	亥: '寅',
+	卯: '午',
+	午: '卯',
+	巳: '申',
+	申: '巳',
+	未: '戌',
+	戌: '未',
+};
+
+const taiSuiPunishmentGroups = [
+	['子', '卯'],
+	['寅', '巳', '申'],
+	['丑', '未', '戌'],
+];
 
 function branchPairKey(a: string, b: string) {
 	return [a, b].sort((left, right) => branchOrder.indexOf(left) - branchOrder.indexOf(right)).join('');
@@ -961,11 +1153,17 @@ function formatRelationsTable(eightChar: EightChar) {
 			const right = pillars[rightKey];
 			const stemCombine = left.getHeavenStem().combine(right.getHeavenStem());
 			if (stemCombine) {
-				rows.push(['天干五合', `${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${left.getHeavenStem().getName()}${right.getHeavenStem().getName()}合${stemCombine.getName()}`]);
+				rows.push([
+					'天干五合',
+					`${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${left.getHeavenStem().getName()}${right.getHeavenStem().getName()}合${stemCombine.getName()}`,
+				]);
 			}
 
 			for (const relation of branchPairRelations(leftBranch, right.getEarthBranch())) {
-				rows.push(['地支关系', `${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${relation}`]);
+				rows.push([
+					'地支关系',
+					`${formatCycleLabel(pillarLabels[leftKey], left)} 与 ${formatCycleLabel(pillarLabels[rightKey], right)}: ${relation}`,
+				]);
 			}
 		}
 	}
@@ -1042,19 +1240,16 @@ function formatElementScoresTable(eightChar: EightChar) {
 		`${((scores[name] / total) * 100).toFixed(1)}%`,
 		name === dayElement ? '日主五行' : '',
 	]);
-	return joinSections([
-		'计分: 天干=1，地支本五行=1，藏干本气/中气/余气=0.6/0.3/0.1',
-		mdTable(['五行', '分数', '占比', '备注'], rows),
-	]);
+	return joinSections(['计分: 天干=1，地支本五行=1，藏干本气/中气/余气=0.6/0.3/0.1', mdTable(['五行', '分数', '占比', '备注'], rows)]);
 }
 
 // ===== Tool Registration =====
 
 const baziPeriodScopes = ['year', 'month', 'day', 'hour'] as const;
-type BaziPeriodScope = typeof baziPeriodScopes[number];
+type BaziPeriodScope = (typeof baziPeriodScopes)[number];
 
 const ziweiTopics = ['self', 'career', 'wealth', 'relationship', 'health', 'family'] as const;
-type ZiweiTopic = typeof ziweiTopics[number];
+type ZiweiTopic = (typeof ziweiTopics)[number];
 
 const mutagenNames = ['禄', '权', '科', '忌'] as const;
 
@@ -1069,11 +1264,12 @@ function normalizeZiweiTopic(topic: string): ZiweiTopic {
 }
 
 function buildFourPillars(eightChar: EightChar, dayMaster: HeavenStem) {
+	const shensha = calculatePillarShensha(eightChar);
 	return {
-		year: pillarDetail(eightChar.getYear(), dayMaster, false),
-		month: pillarDetail(eightChar.getMonth(), dayMaster, false),
-		day: pillarDetail(eightChar.getDay(), dayMaster, true),
-		hour: pillarDetail(eightChar.getHour(), dayMaster, false),
+		year: pillarDetail(eightChar.getYear(), dayMaster, false, shensha.year),
+		month: pillarDetail(eightChar.getMonth(), dayMaster, false, shensha.month),
+		day: pillarDetail(eightChar.getDay(), dayMaster, true, shensha.day),
+		hour: pillarDetail(eightChar.getHour(), dayMaster, false, shensha.hour),
 	};
 }
 
@@ -1089,6 +1285,7 @@ function pillarRecord(label: string, info: PillarInfo) {
 		selfSitting: info.selfSitting,
 		kongwang: info.kongwang,
 		nayin: info.nayin,
+		shenSha: info.shenSha,
 	};
 }
 
@@ -1107,14 +1304,16 @@ function buildMajorLuck(childLimit: ChildLimit, birthYear: number, dayMaster: He
 		startYear: number;
 		endYear: number;
 		ageRange: string;
-	}> = [{
-		type: '童限',
-		startAge: childLimit.getStartAge(),
-		endAge: childLimit.getEndAge(),
-		startYear: birthYear + childLimit.getStartAge() - 1,
-		endYear: birthYear + childLimit.getEndAge(),
-		ageRange: `${childLimit.getStartAge()}-${childLimit.getEndAge()}岁`,
-	}];
+	}> = [
+		{
+			type: '童限',
+			startAge: childLimit.getStartAge(),
+			endAge: childLimit.getEndAge(),
+			startYear: birthYear + childLimit.getStartAge() - 1,
+			endYear: birthYear + childLimit.getEndAge(),
+			ageRange: `${childLimit.getStartAge()}-${childLimit.getEndAge()}岁`,
+		},
+	];
 
 	let decade = childLimit.getStartDecadeFortune();
 	for (let i = 0; i < 10; i++) {
@@ -1158,9 +1357,13 @@ function buildBaziChartData(datetime: string, gender: string) {
 	return {
 		ctx,
 		input: { datetime, gender },
+		genderLabel: genderLabel(gender),
 		solar: solarDay.toString(),
 		lunar: `${lunarDay.toString()} ${eightChar.getHour().getName()}时`,
+		fourPillarText: pillarKeys.map((key) => getPillarCycles(eightChar)[key].getName()).join(' '),
 		dayMaster: dayMaster.getName(),
+		dayPillarKongWang: formatPillarKongWangText(eightChar.getDay()),
+		commanderText: solarTime.getSolarDay().getHideHeavenStemDay().getName(),
 		fourPillars,
 		pillars: pillarRecords(fourPillars),
 		solarTerms,
@@ -1178,18 +1381,26 @@ function buildBaziChartData(datetime: string, gender: string) {
 function formatBaziChartMarkdown(data: ReturnType<typeof buildBaziChartData>) {
 	return joinSections([
 		'八字本命基础盘',
-		`输入: ${data.input.datetime}\n公历: ${data.solar}\n农历: ${data.lunar}\n日主: ${data.dayMaster}`,
+		`输入: ${data.input.datetime}\n性别: ${data.genderLabel}\n公历: ${data.solar}\n农历: ${data.lunar}\n四柱: ${data.fourPillarText}\n日主: ${data.dayMaster}\n日柱空亡: ${data.dayPillarKongWang}\n司令: ${data.commanderText}`,
 		formatPillarsTable(data.fourPillars),
-		mdTable(['节气', '时间'], [
-			[`当前${data.solarTerms.current.name}`, data.solarTerms.current.time],
-			[`下个${data.solarTerms.next.name}`, data.solarTerms.next.time],
-		]),
-		mdTable(['胎元', '胎息', '命宫', '身宫'], [[
-			cycleNayinText(data.specialCycles.fetalOrigin),
-			cycleNayinText(data.specialCycles.fetalBreath),
-			cycleNayinText(data.specialCycles.lifePalace),
-			cycleNayinText(data.specialCycles.bodyPalace),
-		]]),
+		mdTable(
+			['节气', '时间'],
+			[
+				[`当前${data.solarTerms.current.name}`, data.solarTerms.current.time],
+				[`下个${data.solarTerms.next.name}`, data.solarTerms.next.time],
+			],
+		),
+		mdTable(
+			['胎元', '胎息', '命宫', '身宫'],
+			[
+				[
+					cycleNayinText(data.specialCycles.fetalOrigin),
+					cycleNayinText(data.specialCycles.fetalBreath),
+					cycleNayinText(data.specialCycles.lifePalace),
+					cycleNayinText(data.specialCycles.bodyPalace),
+				],
+			],
+		),
 		`起运: ${data.startLuck.description}\n起运日期: ${data.startLuck.startDate}\n顺逆: ${data.startLuck.isForward ? '顺行' : '逆行'}`,
 		mdTable(
 			['运', '干支', '十神', '纳音', '年龄', '年份'],
@@ -1256,7 +1467,10 @@ function calculateRelationRows(eightChar: EightChar) {
 
 function relationRowsMarkdown(rows: Array<{ type: string; relation: string }>) {
 	if (rows.length === 0) return '刑冲合害: 未见明显天干五合、六合、三合、三会、六冲、六害、相刑、破。';
-	return mdTable(['类型', '关系'], rows.map((row) => [row.type, row.relation]));
+	return mdTable(
+		['类型', '关系'],
+		rows.map((row) => [row.type, row.relation]),
+	);
 }
 
 function collectTenGodDistribution(fourPillars: Record<PillarKey, PillarInfo>) {
@@ -1264,11 +1478,9 @@ function collectTenGodDistribution(fourPillars: Record<PillarKey, PillarInfo>) {
 	const add = (tenGod: string, value = 1) => counts.set(tenGod, (counts.get(tenGod) ?? 0) + value);
 	for (const key of pillarKeys) {
 		add(fourPillars[key].tenGod);
-		for (const hidden of fourPillars[key].hiddenStems) add(hidden.tenGod, 0.5);
+		for (const hidden of fourPillars[key].hiddenStems) add(hidden.tenGod, hidden.weight);
 	}
-	return [...counts.entries()]
-		.sort((a, b) => b[1] - a[1])
-		.map(([tenGod, score]) => ({ tenGod, score: Number(score.toFixed(1)) }));
+	return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([tenGod, score]) => ({ tenGod, score: Number(score.toFixed(1)) }));
 }
 
 function collectRootEvidence(fourPillars: Record<PillarKey, PillarInfo>, dayMaster: HeavenStem) {
@@ -1341,27 +1553,33 @@ function formatBaziStructureMarkdown(data: ReturnType<typeof buildBaziStructureD
 	return joinSections([
 		'八字命局结构证据',
 		`输入: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n月令: ${data.monthCommand.branch}(${data.monthCommand.element})\n说明: 此工具不输出最终断命结论，不直接判定身强身弱、格局或用神。`,
-		mdTable(['五行', '分数', '占比', '日主五行'], data.elementScores.map((item) => [
-			item.element,
-			item.score,
-			`${item.percent}%`,
-			item.isDayMasterElement ? '是' : '',
-		])),
-		mdTable(['十神', '权重'], data.tenGodDistribution.map((item) => [item.tenGod, item.score])),
-		mdTable(['柱', '地支', '同五行根气', '同干根气', '命中藏干'], data.rootEvidence.map((item) => [
-			item.pillar,
-			item.branch,
-			item.hasSameElementRoot ? '有' : '无',
-			item.hasExactRoot ? '有' : '无',
-			item.matches.map((match) => `${match.stem}(${match.tenGod})`).join('、') || '-',
-		])),
-		mdTable(['透干位置', '天干', '十神'], data.visibleStemEvidence.map((item) => [
-			item.pillar,
-			item.stem,
-			item.tenGod,
-		])),
+		mdTable(
+			['五行', '分数', '占比', '日主五行'],
+			data.elementScores.map((item) => [item.element, item.score, `${item.percent}%`, item.isDayMasterElement ? '是' : '']),
+		),
+		mdTable(
+			['十神', '权重'],
+			data.tenGodDistribution.map((item) => [item.tenGod, item.score]),
+		),
+		mdTable(
+			['柱', '地支', '同五行根气', '同干根气', '命中藏干'],
+			data.rootEvidence.map((item) => [
+				item.pillar,
+				item.branch,
+				item.hasSameElementRoot ? '有' : '无',
+				item.hasExactRoot ? '有' : '无',
+				item.matches.map((match) => `${match.stem}/${match.qiType}/${match.tenGod}`).join('、') || '-',
+			]),
+		),
+		mdTable(
+			['透干位置', '天干', '十神'],
+			data.visibleStemEvidence.map((item) => [item.pillar, item.stem, item.tenGod]),
+		),
 		relationRowsMarkdown(data.relations),
-		mdTable(['检查项', '证据'], data.checkpoints.map((item) => [item.item, item.evidence])),
+		mdTable(
+			['检查项', '证据'],
+			data.checkpoints.map((item) => [item.item, item.evidence]),
+		),
 		'下一步: 看阶段触发调用 bazi_timeline；看单一年/月/日/时调用 bazi_period_detail。',
 	]);
 }
@@ -1375,31 +1593,54 @@ function relationAgainstOriginal(target: SixtyCycle, eightChar: EightChar) {
 	}));
 }
 
+function cycleEvidence(cycle: SixtyCycle, dayMaster: HeavenStem, shenshaContext: BaziShenshaContext) {
+	const branch = cycle.getEarthBranch();
+	const details = pillarDetail(cycle, dayMaster, false, calculateBranchShensha(shenshaContext, branch.getName()));
+	return {
+		sixtyCycle: details.pillar,
+		tenGod: details.tenGod,
+		heavenStem: details.heavenStem,
+		earthBranch: details.earthBranch,
+		hiddenStems: details.hiddenStems,
+		starFortune: details.terrain,
+		selfSitting: details.selfSitting,
+		kongWang: details.kongwang.join(''),
+		nayin: details.nayin,
+		shenSha: details.shenSha,
+	};
+}
+
 function buildBaziTimelineData(datetime: string, gender: string, startYear: number, count: number) {
 	const chart = buildBaziChartData(datetime, gender);
 	const { dt, solarTime, eightChar, dayMaster } = chart.ctx;
 	const childLimit = ChildLimit.fromSolarTime(solarTime, toGender(gender));
 	const birthYear = dt.year;
-	const startAge = startYear - birthYear + 1;
+	if (startYear < birthYear) throw new Error('startYear must be >= birth year.');
 	const rows: Array<Record<string, unknown>> = [];
-	let fortune = childLimit.getStartFortune();
-	const firstAge = fortune.getAge();
-	if (startAge > firstAge) fortune = fortune.next(startAge - firstAge);
+	const firstFortune = childLimit.getStartFortune();
+	const firstAge = firstFortune.getAge();
+	const shenshaContext = buildShenshaContext(eightChar);
 
 	for (let i = 0; i < count; i++) {
-		const age = fortune.getAge();
-		const year = birthYear + age - 1;
-		const sixtyCycleYear = fortune.getSixtyCycleYear();
-		const xiaoYunSc = fortune.getSixtyCycle();
+		const year = startYear + i;
+		const age = year - birthYear + 1;
+		const fortune = firstFortune.next(age - firstAge);
+		const sixtyCycleYear = SixtyCycleYear.fromYear(year);
+		const xiaoYun = cycleEvidence(fortune.getSixtyCycle(), dayMaster, shenshaContext);
 		const yearSc = sixtyCycleYear.getSixtyCycle();
+		const liuNian = cycleEvidence(yearSc, dayMaster, shenshaContext);
 		let decadeInfo: Record<string, unknown> | null = null;
 		let dec = childLimit.getStartDecadeFortune();
 		for (let d = 0; d < 10; d++) {
 			if (age >= dec.getStartAge() && age <= dec.getEndAge()) {
 				const decSc = dec.getSixtyCycle();
+				const decadeEvidence = cycleEvidence(decSc, dayMaster, shenshaContext);
 				decadeInfo = {
 					sixtyCycle: decSc.getName(),
-					tenGod: dayMaster.getTenStar(decSc.getHeavenStem()).getName(),
+					tenGod: decadeEvidence.tenGod,
+					starFortune: decadeEvidence.starFortune,
+					nayin: decadeEvidence.nayin,
+					shenSha: decadeEvidence.shenSha,
 					startAge: dec.getStartAge(),
 					endAge: dec.getEndAge(),
 				};
@@ -1412,19 +1653,14 @@ function buildBaziTimelineData(datetime: string, gender: string, startYear: numb
 			year,
 			solarRange: sixtyCycleYearSolarRange(sixtyCycleYear),
 			age,
+			stage: decadeInfo ? '大运' : '起运前',
 			decade: decadeInfo,
-			xiaoYun: {
-				sixtyCycle: xiaoYunSc.getName(),
-				tenGod: dayMaster.getTenStar(xiaoYunSc.getHeavenStem()).getName(),
-			},
-			liuNian: {
-				sixtyCycle: yearSc.getName(),
-				tenGod: dayMaster.getTenStar(yearSc.getHeavenStem()).getName(),
-			},
+			xiaoYun,
+			liuNian,
+			taiSui: calculateTaiSui(yearSc.getEarthBranch().getName(), eightChar.getYear().getEarthBranch().getName()),
 			originalRelations: relationAgainstOriginal(yearSc, eightChar),
 			specialRelations: formatSpecialCycleRelations(yearSc, eightChar),
 		});
-		fortune = fortune.next(1);
 	}
 
 	return { chart, startYear, count, rows };
@@ -1435,7 +1671,7 @@ function formatBaziTimelineMarkdown(data: ReturnType<typeof buildBaziTimelineDat
 		'八字大运流年时间轴',
 		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n查询: ${data.startYear} 起 ${data.count} 年`,
 		mdTable(
-			['年份', '公历实际对应范围', '年龄', '大运', '小运', '流年'],
+			['年份', '公历实际对应范围', '年龄', '阶段', '大运', '小运', '流年', '流年星运', '流年纳音', '太岁'],
 			data.rows.map((row) => {
 				const decade = row.decade as Record<string, unknown> | null;
 				const xiaoYun = row.xiaoYun as Record<string, unknown>;
@@ -1444,9 +1680,13 @@ function formatBaziTimelineMarkdown(data: ReturnType<typeof buildBaziTimelineDat
 					row.year,
 					row.solarRange,
 					`${row.age}岁`,
+					row.stage,
 					decade ? `${decade.sixtyCycle}(${decade.tenGod}) ${decade.startAge}-${decade.endAge}岁` : '-',
 					`${xiaoYun.sixtyCycle}(${xiaoYun.tenGod})`,
 					`${liuNian.sixtyCycle}(${liuNian.tenGod})`,
+					liuNian.starFortune,
+					liuNian.nayin,
+					(row.taiSui as string[]).join('、') || '-',
 				];
 			}),
 		),
@@ -1467,6 +1707,20 @@ function formatBaziTimelineMarkdown(data: ReturnType<typeof buildBaziTimelineDat
 				return [row.year, liuNian.sixtyCycle, row.specialRelations];
 			}),
 		),
+		mdTable(
+			['年份', '大运神煞', '小运神煞', '流年神煞'],
+			data.rows.map((row) => {
+				const decade = row.decade as Record<string, unknown> | null;
+				const xiaoYun = row.xiaoYun as Record<string, unknown>;
+				const liuNian = row.liuNian as Record<string, unknown>;
+				return [
+					row.year,
+					decade ? shenshaListText(decade.shenSha as string[]) : '-',
+					shenshaListText(xiaoYun.shenSha as string[]),
+					shenshaListText(liuNian.shenSha as string[]),
+				];
+			}),
+		),
 		'边界: 此工具只给阶段时间轴和触发关系。若要展开某个年/月/日/时，请继续调用 bazi_period_detail。',
 	]);
 }
@@ -1483,18 +1737,18 @@ function buildBaziPeriodData(
 	const chart = buildBaziChartData(datetime, gender);
 	const { eightChar, dayMaster } = chart.ctx;
 	const scope = normalizeBaziPeriodScope(scopeInput);
+	const shenshaContext = buildShenshaContext(eightChar);
 	let target: Record<string, unknown>;
 
 	if (scope === 'year') {
 		if (!year) throw new Error('scope=year requires year.');
 		const scYear = SixtyCycleYear.fromYear(year);
 		const sc = scYear.getSixtyCycle();
+		const evidence = cycleEvidence(sc, dayMaster, shenshaContext);
 		target = {
+			...evidence,
 			scope,
 			label: `${year}年`,
-			sixtyCycle: sc.getName(),
-			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-			nayin: sc.getSound().getName(),
 			solarRange: sixtyCycleYearSolarRange(scYear),
 			originalRelations: relationAgainstOriginal(sc, eightChar),
 			timeline: buildBaziTimelineData(datetime, gender, year, 1).rows[0],
@@ -1504,13 +1758,13 @@ function buildBaziPeriodData(
 		if (month < 1 || month > 12) throw new Error('month must be 1-12.');
 		const scMonth = SixtyCycleYear.fromYear(year).getMonths()[month - 1];
 		const sc = scMonth.getSixtyCycle();
+		const evidence = cycleEvidence(sc, dayMaster, shenshaContext);
 		target = {
+			...evidence,
 			scope,
 			label: `${year}年第${month}个干支月`,
-			sixtyCycle: sc.getName(),
-			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-			nayin: sc.getSound().getName(),
 			solarRange: sixtyCycleMonthSolarRange(scMonth),
+			jieQi: scMonth.getFirstDay().getSolarDay().getTerm().getName(),
 			originalRelations: relationAgainstOriginal(sc, eightChar),
 			specialRelations: formatSpecialCycleRelations(sc, eightChar),
 		};
@@ -1519,12 +1773,11 @@ function buildBaziPeriodData(
 		if (!targetDate) throw new Error('scope=day requires date in YYYY-MM-DD.');
 		const scDay = SixtyCycleDay.fromSolarDay(SolarDay.fromYmd(targetDate.year, targetDate.month, targetDate.day));
 		const sc = scDay.getSixtyCycle();
+		const evidence = cycleEvidence(sc, dayMaster, shenshaContext);
 		target = {
+			...evidence,
 			scope,
 			label: date,
-			sixtyCycle: sc.getName(),
-			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-			nayin: sc.getSound().getName(),
 			twelveStar: scDay.getTwelveStar().getName(),
 			nineStar: scDay.getNineStar().toString(),
 			solarRange: sixtyCycleDaySolarRange(scDay),
@@ -1539,12 +1792,11 @@ function buildBaziPeriodData(
 		if (hour === undefined || hour < 0 || hour > 23) throw new Error('scope=hour requires hour 0-23.');
 		const scHour = SolarTime.fromYmdHms(targetDate.year, targetDate.month, targetDate.day, hour, 0, 0).getSixtyCycleHour();
 		const sc = scHour.getSixtyCycle();
+		const evidence = cycleEvidence(sc, dayMaster, shenshaContext);
 		target = {
+			...evidence,
 			scope,
 			label: `${date} ${pad(hour)}:00`,
-			sixtyCycle: sc.getName(),
-			tenGod: dayMaster.getTenStar(sc.getHeavenStem()).getName(),
-			nayin: sc.getSound().getName(),
 			twelveStar: scHour.getTwelveStar().getName(),
 			nineStar: scHour.getNineStar().toString(),
 			solarRange: sixtyCycleHourSolarRange(scHour),
@@ -1566,19 +1818,52 @@ function formatBaziPeriodMarkdown(data: ReturnType<typeof buildBaziPeriodData>) 
 	const liuNian = timeline?.liuNian as Record<string, unknown> | undefined;
 	return joinSections([
 		'八字单一周期详盘',
-		`出生: ${data.chart.input.datetime}\n日主: ${data.chart.dayMaster}\n周期层级: ${data.target.scope}\n周期: ${data.target.label}\n干支: ${data.target.sixtyCycle}(${data.target.tenGod})\n纳音: ${data.target.nayin}\n公历实际对应范围: ${data.target.solarRange}`,
-		data.target.twelveStar || data.target.nineStar ? `十二建星: ${data.target.twelveStar ?? '-'}\n九星: ${data.target.nineStar ?? '-'}` : undefined,
-		timeline ? mdTable(['年份', '年龄', '大运', '小运', '流年', '胎元/命宫/身宫关系'], [[
-			timeline.year,
-			`${timeline.age}岁`,
-			decade ? `${decade.sixtyCycle}(${decade.tenGod}) ${decade.startAge}-${decade.endAge}岁` : '-',
-			xiaoYun ? `${xiaoYun.sixtyCycle}(${xiaoYun.tenGod})` : '-',
-			liuNian ? `${liuNian.sixtyCycle}(${liuNian.tenGod})` : '-',
-			timeline.specialRelations ?? '-',
-		]]) : undefined,
-		mdTable(['原局柱', '原局干支', '与周期关系'], relations.map((row) => [row.pillar, row.original, row.relation])),
+		`出生: ${data.chart.input.datetime}\n四柱: ${data.chart.fourPillarText}\n日主: ${data.chart.dayMaster}\n周期层级: ${data.target.scope}\n周期: ${data.target.label}\n干支: ${data.target.sixtyCycle}(${data.target.tenGod})\n星运: ${data.target.starFortune}\n自坐: ${data.target.selfSitting}\n空亡: ${data.target.kongWang || '-'}\n纳音: ${data.target.nayin}\n公历实际对应范围: ${data.target.solarRange}`,
+		data.target.jieQi ? `节气: ${data.target.jieQi}` : undefined,
+		data.target.twelveStar || data.target.nineStar
+			? `十二建星: ${data.target.twelveStar ?? '-'}\n九星: ${data.target.nineStar ?? '-'}`
+			: undefined,
+		timeline
+			? mdTable(
+					['年份', '年龄', '大运', '小运', '流年', '胎元/命宫/身宫关系'],
+					[
+						[
+							timeline.year,
+							`${timeline.age}岁`,
+							decade ? `${decade.sixtyCycle}(${decade.tenGod}) ${decade.startAge}-${decade.endAge}岁` : '-',
+							xiaoYun ? `${xiaoYun.sixtyCycle}(${xiaoYun.tenGod})` : '-',
+							liuNian ? `${liuNian.sixtyCycle}(${liuNian.tenGod})` : '-',
+							timeline.specialRelations ?? '-',
+						],
+					],
+				)
+			: undefined,
+		mdTable(
+			['项目', '值'],
+			[
+				['天干', data.target.heavenStem],
+				['地支', data.target.earthBranch],
+				[
+					'藏干',
+					(data.target.hiddenStems as PillarInfo['hiddenStems'])
+						.map(({ stem, qiType, tenGod }) => `${stem}/${qiType}/${tenGod}`)
+						.join('、') || '-',
+				],
+				['星运', data.target.starFortune],
+				['自坐', data.target.selfSitting],
+				['空亡', data.target.kongWang || '-'],
+				['纳音', data.target.nayin],
+				['神煞', shenshaListText(data.target.shenSha as string[])],
+			],
+		),
+		mdTable(
+			['原局柱', '原局干支', '与周期关系'],
+			relations.map((row) => [row.pillar, row.original, row.relation]),
+		),
 		data.target.specialRelations ? `胎元/命宫/身宫关系: ${data.target.specialRelations}` : undefined,
-		Array.isArray(data.target.recommends) ? mdTable(['宜', '忌'], [[(data.target.recommends as string[]).join('、'), (data.target.avoids as string[]).join('、')]]) : undefined,
+		Array.isArray(data.target.recommends)
+			? mdTable(['宜', '忌'], [[(data.target.recommends as string[]).join('、'), (data.target.avoids as string[]).join('、')]])
+			: undefined,
 		'边界: 此工具只展开指定周期证据，不替代 bazi_structure 的命局结构判断。',
 	]);
 }
@@ -1596,16 +1881,18 @@ function starRecord(star: IFunctionalStar) {
 type StarRecord = ReturnType<typeof starRecord>;
 type CompactStarRecord = ReturnType<typeof compactZiweiStarRecord>;
 
-function starRecordText(star: Pick<StarRecord, 'name' | 'brightness' | 'mutagen'> | Pick<CompactStarRecord, 'name' | 'brightness' | 'mutagen'>) {
-	return [
-		star.name,
-		star.brightness ? `(${star.brightness})` : undefined,
-		star.mutagen ? `[${star.mutagen}]` : undefined,
-	].filter(Boolean).join('');
+function starRecordText(
+	star: Pick<StarRecord, 'name' | 'brightness' | 'mutagen'> | Pick<CompactStarRecord, 'name' | 'brightness' | 'mutagen'>,
+) {
+	return [star.name, star.brightness ? `(${star.brightness})` : undefined, star.mutagen ? `[${star.mutagen}]` : undefined]
+		.filter(Boolean)
+		.join('');
 }
 
 function starRecordsText(
-	stars: Array<Pick<StarRecord, 'name' | 'brightness' | 'mutagen'> | Pick<CompactStarRecord, 'name' | 'brightness' | 'mutagen'>> | undefined,
+	stars:
+		| Array<Pick<StarRecord, 'name' | 'brightness' | 'mutagen'> | Pick<CompactStarRecord, 'name' | 'brightness' | 'mutagen'>>
+		| undefined,
 	empty = '-',
 ) {
 	return stars && stars.length > 0 ? stars.map(starRecordText).join('、') : empty;
@@ -1668,7 +1955,11 @@ function compactZiweiPalaceEvidence(palace: IFunctionalPalace) {
 function compactZiweiSurroundedEvidence(surrounded: ReturnType<IFunctionalAstrolabe['surroundedPalaces']>) {
 	return [
 		{ relation: '本宫', palace: ziweiPalaceRef(surrounded.target), majorStars: surrounded.target.majorStars.map(compactZiweiStarRecord) },
-		{ relation: '对宫', palace: ziweiPalaceRef(surrounded.opposite), majorStars: surrounded.opposite.majorStars.map(compactZiweiStarRecord) },
+		{
+			relation: '对宫',
+			palace: ziweiPalaceRef(surrounded.opposite),
+			majorStars: surrounded.opposite.majorStars.map(compactZiweiStarRecord),
+		},
 		{ relation: '财帛位', palace: ziweiPalaceRef(surrounded.wealth), majorStars: surrounded.wealth.majorStars.map(compactZiweiStarRecord) },
 		{ relation: '官禄位', palace: ziweiPalaceRef(surrounded.career), majorStars: surrounded.career.majorStars.map(compactZiweiStarRecord) },
 	];
@@ -1741,7 +2032,13 @@ function buildZiweiChartData(
 function formatZiweiChartMarkdown(data: ReturnType<typeof buildZiweiChartData>) {
 	return joinSections([
 		'紫微斗数本命全盘',
-		formatZiweiSummary(data.chart.astrolabe, data.summary.inputDatetime, data.chart.calendar, data.chart.profile, data.chart.option.timeIndex),
+		formatZiweiSummary(
+			data.chart.astrolabe,
+			data.summary.inputDatetime,
+			data.chart.calendar,
+			data.chart.profile,
+			data.chart.option.timeIndex,
+		),
 		joinSections(['十二宫星曜', formatZiweiPalacesTable(data.chart.astrolabe)]),
 		joinSections(['生年四化', formatZiweiTransformsTable(data.chart.astrolabe)]),
 		'边界: 本工具只给本命全盘。看单宫三方四正、夹宫、空宫借星与飞化自化，请调用 ziwei_palace_detail；看运限请调用 ziwei_horoscope_overview。',
@@ -1782,34 +2079,52 @@ function formatZiweiPalaceDetailMarkdown(data: ReturnType<typeof buildZiweiPalac
 		'紫微斗数单宫详盘',
 		`输入: ${data.summary.inputDatetime}\n历法: ${data.summary.calendar === 'solar' ? '公历' : '农历'}\n流派: ${ziweiProfileLabels[data.summary.profile as ZiweiProfile]} (${data.summary.profile})\n公历: ${data.summary.solarDate}\n农历: ${data.summary.lunarDate}`,
 		`宫位: ${palace.name}(${palace.heavenlyStem}${palace.earthlyBranch})\n标记: ${palace.flags}\n空宫: ${palace.isEmpty ? '是' : '否'}`,
-		mdTable(['项目', '主星', '辅星', '杂曜', '长生/博士/将前/岁前', '大限', '小限年龄'], [[
-			`${palace.name}(${palace.heavenlyStem}${palace.earthlyBranch})`,
-			starRecordsText(palace.majorStars as StarRecord[]),
-			starRecordsText(palace.minorStars as StarRecord[]),
-			starRecordsText(palace.adjectiveStars as StarRecord[]),
-			`${palace.changsheng12}/${palace.boshi12}/${palace.jiangqian12}/${palace.suiqian12}`,
-			palace.decadal ? `${palace.decadal.range?.[0] ?? '-'}-${palace.decadal.range?.[1] ?? '-'}岁 ${palace.decadal.heavenlyStem}${palace.decadal.earthlyBranch}` : '-',
-			Array.isArray(palace.ages) && palace.ages.length > 0 ? palace.ages.join('、') : '-',
-		]]),
-		mdTable(['关系', '宫位', '干支', '主星', '辅星'], data.surrounded.map((item) => [
-			item.relation,
-			item.palace.name,
-			`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
-			starRecordsText(item.palace.majorStars as StarRecord[]),
-			starRecordsText(item.palace.minorStars as StarRecord[]),
-		])),
-		mdTable(['夹宫', '宫位', '干支', '主星'], data.adjacent.map((item) => [
-			item.relation,
-			item.palace.name,
-			`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
-			starRecordsText(item.palace.majorStars as StarRecord[]),
-		])),
-		data.borrowedFromOpposite ? `空宫借星参考: 对宫 ${data.borrowedFromOpposite.name} 主星 ${starRecordsText(data.borrowedFromOpposite.majorStars as StarRecord[])}` : undefined,
-		mdTable(['宫干四化', '飞入宫位', '自化'], data.flyingTransforms.map((item) => [
-			item.mutagen,
-			item.toPalace ? `${item.toPalace.name}(${item.toPalace.heavenlyStem}${item.toPalace.earthlyBranch})` : '-',
-			item.isSelfMutaged ? '是' : '否',
-		])),
+		mdTable(
+			['项目', '主星', '辅星', '杂曜', '长生/博士/将前/岁前', '大限', '小限年龄'],
+			[
+				[
+					`${palace.name}(${palace.heavenlyStem}${palace.earthlyBranch})`,
+					starRecordsText(palace.majorStars as StarRecord[]),
+					starRecordsText(palace.minorStars as StarRecord[]),
+					starRecordsText(palace.adjectiveStars as StarRecord[]),
+					`${palace.changsheng12}/${palace.boshi12}/${palace.jiangqian12}/${palace.suiqian12}`,
+					palace.decadal
+						? `${palace.decadal.range?.[0] ?? '-'}-${palace.decadal.range?.[1] ?? '-'}岁 ${palace.decadal.heavenlyStem}${palace.decadal.earthlyBranch}`
+						: '-',
+					Array.isArray(palace.ages) && palace.ages.length > 0 ? palace.ages.join('、') : '-',
+				],
+			],
+		),
+		mdTable(
+			['关系', '宫位', '干支', '主星', '辅星'],
+			data.surrounded.map((item) => [
+				item.relation,
+				item.palace.name,
+				`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
+				starRecordsText(item.palace.majorStars as StarRecord[]),
+				starRecordsText(item.palace.minorStars as StarRecord[]),
+			]),
+		),
+		mdTable(
+			['夹宫', '宫位', '干支', '主星'],
+			data.adjacent.map((item) => [
+				item.relation,
+				item.palace.name,
+				`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
+				starRecordsText(item.palace.majorStars as StarRecord[]),
+			]),
+		),
+		data.borrowedFromOpposite
+			? `空宫借星参考: 对宫 ${data.borrowedFromOpposite.name} 主星 ${starRecordsText(data.borrowedFromOpposite.majorStars as StarRecord[])}`
+			: undefined,
+		mdTable(
+			['宫干四化', '飞入宫位', '自化'],
+			data.flyingTransforms.map((item) => [
+				item.mutagen,
+				item.toPalace ? `${item.toPalace.name}(${item.toPalace.heavenlyStem}${item.toPalace.earthlyBranch})` : '-',
+				item.isSelfMutaged ? '是' : '否',
+			]),
+		),
 		'边界: 此工具只给单宫证据，不直接给最终吉凶断语。需要运限叠盘时调用 ziwei_scope_detail 或 ziwei_topic_context。',
 	]);
 }
@@ -1847,14 +2162,17 @@ function formatZiweiHoroscopeOverviewMarkdown(data: ReturnType<typeof buildZiwei
 	return joinSections([
 		'紫微运限总览',
 		`出生: ${data.birthDatetime} (${data.ctx.calendar === 'solar' ? '公历' : '农历'})\n目标: ${data.targetDatetime}\n目标公历: ${data.ctx.horoscope.solarDate}\n目标农历: ${data.ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[data.ctx.profile]} (${data.ctx.profile})\n目标时辰索引: ${data.ctx.targetTimeIndex}`,
-		mdTable(['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
-			item.label,
-			item.branch,
-			item.solarRange,
-			item.originPalace,
-			item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
-			item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',
-		])),
+		mdTable(
+			['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '流耀提示'],
+			data.overview.map((item) => [
+				item.label,
+				item.branch,
+				item.solarRange,
+				item.originPalace,
+				item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
+				item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',
+			]),
+		),
 		'边界: 这个工具只做导航总览，不展开十二宫。下一步必须调用 ziwei_scope_detail 展开单层运限，或调用 ziwei_topic_context 做专题取证。',
 	]);
 }
@@ -1902,7 +2220,7 @@ function buildZiweiScopeDetailData(
 			nominalAge: scope === 'age' ? ctx.horoscope.age.nominalAge : null,
 		},
 		palaces,
-		focus, 
+		focus,
 	};
 }
 
@@ -1910,35 +2228,46 @@ function formatZiweiScopeDetailMarkdown(data: ReturnType<typeof buildZiweiScopeD
 	return joinSections([
 		'紫微单层运限详盘',
 		`层级: ${ziweiScopeLabels[data.scope]}\n重点宫位: ${data.focusPalace}\n出生: ${data.birthDatetime}\n目标: ${data.targetDatetime}\n目标公历: ${data.ctx.horoscope.solarDate}\n目标农历: ${data.ctx.horoscope.lunarDate}\n流派: ${ziweiProfileLabels[data.ctx.profile]} (${data.ctx.profile})`,
-		mdTable(['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '虚岁'], [[
-			ziweiScopeLabels[data.scope],
-			data.item.branch,
-			data.item.solarRange,
-			data.item.originPalace,
-			data.item.mutagens.length > 0 ? data.item.mutagens.join('、') : '-',
-			data.item.nominalAge ? `${data.item.nominalAge}虚岁` : '-',
-		]]),
-		mdTable(['序', '运限宫位', '原盘宫位', '原盘干支', '标记', '空宫', '原盘主星', '原盘辅星', '原盘杂曜', '流耀'], data.palaces.map((item) => [
-			item.index,
-			item.runtimePalace,
-			item.originPalace.name,
-			`${item.originPalace.heavenlyStem}${item.originPalace.earthlyBranch}`,
-			item.originPalace.flags,
-			item.originPalace.isEmpty ? '是' : '否',
-			starRecordsText(item.originPalace.majorStars as StarRecord[]),
-			starRecordsText(item.originPalace.minorStars as StarRecord[]),
-			starRecordsText(item.originPalace.adjectiveStars as StarRecord[]),
-			starRecordsText(item.horoscopeStars as StarRecord[]),
-		])),
+		mdTable(
+			['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '虚岁'],
+			[
+				[
+					ziweiScopeLabels[data.scope],
+					data.item.branch,
+					data.item.solarRange,
+					data.item.originPalace,
+					data.item.mutagens.length > 0 ? data.item.mutagens.join('、') : '-',
+					data.item.nominalAge ? `${data.item.nominalAge}虚岁` : '-',
+				],
+			],
+		),
+		mdTable(
+			['序', '运限宫位', '原盘宫位', '原盘干支', '标记', '空宫', '原盘主星', '原盘辅星', '原盘杂曜', '流耀'],
+			data.palaces.map((item) => [
+				item.index,
+				item.runtimePalace,
+				item.originPalace.name,
+				`${item.originPalace.heavenlyStem}${item.originPalace.earthlyBranch}`,
+				item.originPalace.flags,
+				item.originPalace.isEmpty ? '是' : '否',
+				starRecordsText(item.originPalace.majorStars as StarRecord[]),
+				starRecordsText(item.originPalace.minorStars as StarRecord[]),
+				starRecordsText(item.originPalace.adjectiveStars as StarRecord[]),
+				starRecordsText(item.horoscopeStars as StarRecord[]),
+			]),
+		),
 		data.scope === 'age'
 			? `小限宫位: ${(data.focus as { agePalace: ReturnType<typeof palaceRecord> | null }).agePalace?.name ?? '-'}`
-			: mdTable(['关系', '原盘宫位', '干支', '主星', '辅星'], ((data.focus as { surrounded: ReturnType<typeof ziweiSurroundedRecord> }).surrounded).map((item) => [
-				item.relation,
-				item.palace.name,
-				`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
-				starRecordsText(item.palace.majorStars as StarRecord[]),
-				starRecordsText(item.palace.minorStars as StarRecord[]),
-			])),
+			: mdTable(
+					['关系', '原盘宫位', '干支', '主星', '辅星'],
+					(data.focus as { surrounded: ReturnType<typeof ziweiSurroundedRecord> }).surrounded.map((item) => [
+						item.relation,
+						item.palace.name,
+						`${item.palace.heavenlyStem}${item.palace.earthlyBranch}`,
+						starRecordsText(item.palace.majorStars as StarRecord[]),
+						starRecordsText(item.palace.minorStars as StarRecord[]),
+					]),
+				),
 		'边界: 此工具只展开一个运限层级。专题整合请调用 ziwei_topic_context。',
 	]);
 }
@@ -1969,7 +2298,9 @@ function buildZiweiTopicContextData(
 		const origin = overview.ctx.astrolabe.palace(name as never);
 		if (!origin) throw new Error(`Unknown topic palace: ${name}`);
 		const yearlyPalace = overview.ctx.horoscope.palace(name as never, 'yearly');
-		const yearlyMutagenHits = mutagenNames.filter((mutagen) => overview.ctx.horoscope.hasHoroscopeMutagen(name as never, 'yearly', mutagen as never));
+		const yearlyMutagenHits = mutagenNames.filter((mutagen) =>
+			overview.ctx.horoscope.hasHoroscopeMutagen(name as never, 'yearly', mutagen as never),
+		);
 		return {
 			name,
 			natal: compactZiweiPalaceEvidence(origin),
@@ -2007,30 +2338,53 @@ function formatZiweiTopicContextMarkdown(data: ReturnType<typeof buildZiweiTopic
 	return joinSections([
 		'紫微专题取证',
 		`专题: ${data.topic}\n出生: ${data.birthDatetime}\n目标: ${data.targetDatetime}\n相关宫位: ${data.topicPalaces.join('、')}\n流派: ${ziweiProfileLabels[data.runtime.profile]} (${data.runtime.profile})\n历法: ${data.runtime.calendar === 'solar' ? '公历' : '农历'}\n目标公历: ${data.runtime.targetSolarDate}\n目标农历: ${data.runtime.targetLunarDate}\n目标时辰索引: ${data.runtime.targetTimeIndex}`,
-		mdTable(['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '流耀提示'], data.overview.map((item) => [
-			item.label,
-			item.branch,
-			item.solarRange,
-			item.originPalace,
-			item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
-			item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',
-		])),
-		mdTable(['宫位', '本命干支', '本命主星', '本命辅星', '本命四化星', '流年宫位', '流年流耀', '流年四化命中'], data.palaces.map((item) => [
-			item.name,
-			item.natal.stemBranch,
-			starRecordsText(item.natal.majorStars),
-			starRecordsText(item.natal.minorStars),
-			starRecordsText(item.natal.mutagenStars),
-			item.yearly ? `${item.yearly.name}(${item.yearly.stemBranch})` : '-',
-			starRecordsText(item.yearlyStars),
-			item.yearlyMutagenHits.join('、') || '-',
-		])),
-		mdTable(['宫位', '本命三方四正', '本命飞化', '建议调用'], data.palaces.map((item) => [
-			item.name,
-			item.natalSurrounded.map((surrounded) => `${surrounded.relation}:${surrounded.palace.name}(${starRecordsText(surrounded.majorStars)})`).join('；'),
-			item.natalFlyingTransforms.map((fly) => `${fly.mutagen}->${fly.toPalace ? `${fly.toPalace.name}(${fly.toPalace.stemBranch})` : '-'}${fly.isSelfMutaged ? '[自化]' : ''}`).join('；'),
-			item.nextCalls.map((call) => `${call.tool}(${Object.entries(call.arguments).map(([key, value]) => `${key}=${value}`).join(', ')})`).join('；'),
-		])),
+		mdTable(
+			['层级', '干支', '公历实际对应范围', '所在原盘宫', '四化', '流耀提示'],
+			data.overview.map((item) => [
+				item.label,
+				item.branch,
+				item.solarRange,
+				item.originPalace,
+				item.mutagens.length > 0 ? item.mutagens.join('、') : '-',
+				item.starPalaceCount > 0 ? `有流耀宫位 ${item.starPalaceCount}/12` : '-',
+			]),
+		),
+		mdTable(
+			['宫位', '本命干支', '本命主星', '本命辅星', '本命四化星', '流年宫位', '流年流耀', '流年四化命中'],
+			data.palaces.map((item) => [
+				item.name,
+				item.natal.stemBranch,
+				starRecordsText(item.natal.majorStars),
+				starRecordsText(item.natal.minorStars),
+				starRecordsText(item.natal.mutagenStars),
+				item.yearly ? `${item.yearly.name}(${item.yearly.stemBranch})` : '-',
+				starRecordsText(item.yearlyStars),
+				item.yearlyMutagenHits.join('、') || '-',
+			]),
+		),
+		mdTable(
+			['宫位', '本命三方四正', '本命飞化', '建议调用'],
+			data.palaces.map((item) => [
+				item.name,
+				item.natalSurrounded
+					.map((surrounded) => `${surrounded.relation}:${surrounded.palace.name}(${starRecordsText(surrounded.majorStars)})`)
+					.join('；'),
+				item.natalFlyingTransforms
+					.map(
+						(fly) =>
+							`${fly.mutagen}->${fly.toPalace ? `${fly.toPalace.name}(${fly.toPalace.stemBranch})` : '-'}${fly.isSelfMutaged ? '[自化]' : ''}`,
+					)
+					.join('；'),
+				item.nextCalls
+					.map(
+						(call) =>
+							`${call.tool}(${Object.entries(call.arguments)
+								.map(([key, value]) => `${key}=${value}`)
+								.join(', ')})`,
+					)
+					.join('；'),
+			]),
+		),
 		`边界: ${data.warnings.join(' ')}`,
 	]);
 }
@@ -2040,7 +2394,8 @@ function registerBaziTools(server: McpServer) {
 		'bazi_chart',
 		{
 			title: '八字排盘',
-			description: '适用场景: 第一步获取八字客观基础盘。不要用于直接判断身强身弱、格局或用神。下一步: 调用 bazi_structure 做命局结构取证，或 bazi_timeline 看阶段触发。',
+			description:
+				'适用场景: 第一步获取八字客观基础盘。不要用于直接判断身强身弱、格局或用神。下一步: 调用 bazi_structure 做命局结构取证，或 bazi_timeline 看阶段触发。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM，按出生地当地民用时间输入'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2060,7 +2415,8 @@ function registerBaziTools(server: McpServer) {
 		'bazi_structure',
 		{
 			title: '八字命局分析',
-			description: '适用场景: 在 bazi_chart 后分析日主、月令、通根、透干、五行、十神、刑冲合害与旺衰取用证据。不要输出最终断命结论。下一步: 调用 bazi_timeline 或 bazi_period_detail 验证阶段。',
+			description:
+				'适用场景: 在 bazi_chart 后分析日主、月令、通根、透干、五行、十神、刑冲合害与旺衰取用证据。不要输出最终断命结论。下一步: 调用 bazi_timeline 或 bazi_period_detail 验证阶段。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2080,7 +2436,8 @@ function registerBaziTools(server: McpServer) {
 		'bazi_timeline',
 		{
 			title: '八字大运流年',
-			description: '适用场景: 在本命结构后查看大运、流年、小运、年龄、年份和原局触发。不要用于单独断某一年细节。下一步: 对重点年份调用 bazi_period_detail。',
+			description:
+				'适用场景: 在本命结构后查看大运、流年、小运、年龄、年份和原局触发。不要用于单独断某一年细节。下一步: 对重点年份调用 bazi_period_detail。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2102,7 +2459,8 @@ function registerBaziTools(server: McpServer) {
 		'bazi_period_detail',
 		{
 			title: '八字周期详盘',
-			description: '适用场景: 展开某一年、干支月、日或小时与原局/大运流年的叠加证据。不要替代 bazi_structure 的命局结构判断。下一步: 回到用户专题问题组织解读。',
+			description:
+				'适用场景: 展开某一年、干支月、日或小时与原局/大运流年的叠加证据。不要替代 bazi_structure 的命局结构判断。下一步: 回到用户专题问题组织解读。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2127,20 +2485,25 @@ function registerBaziTools(server: McpServer) {
 		'bazi_shensha',
 		{
 			title: '八字神煞参考',
-			description: '适用场景: 需要神煞作为附加证据时调用。不要单独用神煞断事或替代 bazi_structure。下一步: 回到 bazi_structure 或 bazi_period_detail 与主结构合看。',
+			description:
+				'适用场景: 需要神煞作为附加证据时调用。不要单独用神煞断事或替代 bazi_structure。下一步: 回到 bazi_structure 或 bazi_period_detail 与主结构合看。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM'),
+				onlyHits: z.boolean().optional().default(true).describe('是否只返回命中项。当前按 taibu-core 神煞命中清单输出，默认 true。'),
 			},
 		},
-		async ({ datetime }) => {
+		async ({ datetime, onlyHits }) => {
 			try {
 				const { eightChar } = buildBaziContext(datetime);
-				return textResult(joinSections([
-					'常用八字神煞辅助表',
-					`输入: ${datetime}`,
-					formatShenshaTable(eightChar),
-					'边界: 神煞为辅助参考，不可单独断事。',
-				]));
+				return textResult(
+					joinSections([
+						'常用八字神煞辅助表',
+						`输入: ${datetime}`,
+						formatShenshaTable(eightChar, onlyHits),
+						'来源: taibu-core/data/shensha 静态神煞表；按当前 tyme4ts 四柱命中计算。',
+						'边界: 神煞为辅助参考，不可单独断事；必须回到十神、五行、月令、组合和流运同看。',
+					]),
+				);
 			} catch (e) {
 				return errResult(`bazi_shensha 错误: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -2153,7 +2516,8 @@ function registerZiweiTools(server: McpServer) {
 		'ziwei_chart',
 		{
 			title: '紫微斗数排盘',
-			description: '适用场景: 第一步获取紫微本命十二宫全盘。不要用于展开单宫飞化或运限叠盘。下一步: 调用 ziwei_palace_detail 看单宫，或 ziwei_horoscope_overview 看运限。',
+			description:
+				'适用场景: 第一步获取紫微本命十二宫全盘。不要用于展开单宫飞化或运限叠盘。下一步: 调用 ziwei_palace_detail 看单宫，或 ziwei_horoscope_overview 看运限。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2177,7 +2541,8 @@ function registerZiweiTools(server: McpServer) {
 		'ziwei_palace_detail',
 		{
 			title: '紫微宫位详盘',
-			description: '适用场景: 展开某个本命宫位的本宫、对宫、三方四正、夹宫、空宫借星、飞化和自化证据。不要用于运限总览。下一步: 要叠运限调用 ziwei_scope_detail 或 ziwei_topic_context。',
+			description:
+				'适用场景: 展开某个本命宫位的本宫、对宫、三方四正、夹宫、空宫借星、飞化和自化证据。不要用于运限总览。下一步: 要叠运限调用 ziwei_scope_detail 或 ziwei_topic_context。',
 			inputSchema: {
 				datetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2202,7 +2567,8 @@ function registerZiweiTools(server: McpServer) {
 		'ziwei_horoscope_overview',
 		{
 			title: '紫微运限概览',
-			description: '适用场景: 只做大限、小限、流年、流月、流日、流时入口级导航。不要作为最终运势分析。下一步: 必须调用 ziwei_scope_detail 展开单层，或 ziwei_topic_context 做专题取证。',
+			description:
+				'适用场景: 只做大限、小限、流年、流月、流日、流时入口级导航。不要作为最终运势分析。下一步: 必须调用 ziwei_scope_detail 展开单层，或 ziwei_topic_context 做专题取证。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2227,7 +2593,8 @@ function registerZiweiTools(server: McpServer) {
 		'ziwei_scope_detail',
 		{
 			title: '紫微运限详盘',
-			description: '适用场景: 展开一个层级的大限/小限/流年/流月/流日/流时十二宫映射、流耀、四化与重点宫位三方四正。不要一次请求全部层级。下一步: 专题整合调用 ziwei_topic_context。',
+			description:
+				'适用场景: 展开一个层级的大限/小限/流年/流月/流日/流时十二宫映射、流耀、四化与重点宫位三方四正。不要一次请求全部层级。下一步: 专题整合调用 ziwei_topic_context。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2242,7 +2609,17 @@ function registerZiweiTools(server: McpServer) {
 		},
 		async ({ birthDatetime, gender, targetDatetime, scope, focusPalace, profile, calendar, isLeapMonth, language }) => {
 			try {
-				const data = buildZiweiScopeDetailData(birthDatetime, gender, targetDatetime, scope, focusPalace, profile, calendar, isLeapMonth, language);
+				const data = buildZiweiScopeDetailData(
+					birthDatetime,
+					gender,
+					targetDatetime,
+					scope,
+					focusPalace,
+					profile,
+					calendar,
+					isLeapMonth,
+					language,
+				);
 				return textResult(formatZiweiScopeDetailMarkdown(data));
 			} catch (e) {
 				return errResult(`ziwei_scope_detail 错误: ${e instanceof Error ? e.message : String(e)}`);
@@ -2254,7 +2631,8 @@ function registerZiweiTools(server: McpServer) {
 		'ziwei_topic_context',
 		{
 			title: '紫微专题分析',
-			description: '适用场景: 针对自我、事业、财富、关系、健康、家庭聚合本命与流年证据。不要直接输出最终断语。下一步: 对关键宫位调用 ziwei_palace_detail 或 ziwei_scope_detail。',
+			description:
+				'适用场景: 针对自我、事业、财富、关系、健康、家庭聚合本命与流年证据。不要直接输出最终断语。下一步: 对关键宫位调用 ziwei_palace_detail 或 ziwei_scope_detail。',
 			inputSchema: {
 				birthDatetime: z.string().describe('出生日期时间 YYYY-MM-DD HH:MM；calendar=lunar 时日期部分按农历解释'),
 				gender: z.string().describe('性别: 男/女 或 male/female'),
@@ -2311,7 +2689,10 @@ function serverInfoText() {
 		'Lunar Calendar MCP Server',
 		`${allTools.map((tool) => tool.title).join('、')}。`,
 		'MCP endpoint: /lunar',
-		mdTable(['Tool', 'Title'], allTools.map((tool) => [tool.name, tool.title])),
+		mdTable(
+			['Tool', 'Title'],
+			allTools.map((tool) => [tool.name, tool.title]),
+		),
 	]);
 }
 
